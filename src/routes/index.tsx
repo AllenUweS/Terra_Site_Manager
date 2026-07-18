@@ -230,7 +230,7 @@ function Index() {
       <main>
         {/* HERO — scroll-scrubbed video */}
         <div id="hero" ref={heroWrapRef} className="relative" style={{ height: `${scrollLen}px` }}>
-          <section className="sticky top-0 overflow-hidden flex flex-col justify-between w-full h-svh">
+          <section className="sticky top-0 overflow-hidden flex flex-col justify-between w-full h-dvh">
             <video
               ref={videoRef}
               src={`${ASSET}/hero/hero.mp4`}
