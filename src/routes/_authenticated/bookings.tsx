@@ -62,7 +62,8 @@ function BookingsPage() {
         <h1 className="text-display text-4xl mt-1">Bookings</h1>
       </div>
 
-      <div className="bg-card border rounded-lg overflow-hidden">
+      {/* Desktop Table View */}
+      <div className="hidden md:block bg-card border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
@@ -123,6 +124,60 @@ function BookingsPage() {
           </table>
         </div>
       </div>
+
+      {/* Mobile Card List View */}
+      <div className="md:hidden space-y-4">
+        {bookings?.map((b: any) => (
+          <div key={b.id} className="bg-card border rounded-lg p-4 space-y-3 shadow-xs">
+            <div className="flex justify-between items-start gap-2">
+              <div>
+                <div className="font-semibold text-base">{b.plots?.projects?.name}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {b.plots?.projects?.code} · Plot {b.plots?.plot_number}
+                </div>
+              </div>
+              <span className={`text-xs px-2.5 py-0.5 rounded-full border capitalize whitespace-nowrap ${statusStyle[b.status]}`}>
+                {b.status.replace("_", " ")}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 py-2 border-y text-sm">
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Customer</div>
+                <div className="font-medium mt-0.5">{b.customer_name}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{b.customer_phone}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Financials</div>
+                <div className="font-medium mt-0.5">₹{Number(b.total_price).toLocaleString("en-IN")}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">₹{Number(b.advance_paid).toLocaleString("en-IN")} paid</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pt-1 text-xs text-muted-foreground">
+              <div>
+                Booked on: {new Date(b.booking_date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+              </div>
+              {isAdmin && b.status === "pending" && (
+                <div className="flex gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+                  <Button size="sm" variant="outline" className="flex-1 sm:flex-initial" onClick={() => update.mutate({ id: b.id, status: "approved" })}>
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 sm:flex-initial text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => update.mutate({ id: b.id, status: "rejected" })}>
+                    Reject
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {bookings && bookings.length === 0 && (
+          <div className="bg-card border rounded-lg p-8 text-center text-muted-foreground">
+            No bookings yet.
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
