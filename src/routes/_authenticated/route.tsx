@@ -114,10 +114,10 @@ function AuthedLayout() {
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                className={`flex items-center gap-3 py-2 rounded-r-md text-sm border-l-2 transition-all duration-200 ${
                   active
-                    ? "bg-terracotta/10 text-terracotta font-medium"
-                    : "text-foreground hover:bg-muted"
+                    ? "bg-terracotta/[0.06] text-terracotta font-semibold border-terracotta pl-3.5 pr-3"
+                    : "text-foreground/80 hover:bg-muted/60 hover:text-foreground border-transparent pl-4 pr-3"
                 }`}
               >
                 <Icon className="h-4 w-4" />
@@ -182,12 +182,12 @@ function AuthedLayout() {
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-300 transform ${
+                className={`flex items-center gap-3 py-2.5 rounded-r-md text-sm border-l-2 transition-all duration-300 transform ${
                   isOpen ? "translate-x-0 opacity-100" : "-translate-x-4 opacity-0"
                 } ${
                   active
-                    ? "bg-terracotta/10 text-terracotta font-medium"
-                    : "text-foreground hover:bg-muted"
+                    ? "bg-terracotta/[0.06] text-terracotta font-semibold border-terracotta pl-3.5 pr-3"
+                    : "text-foreground/80 hover:bg-muted/60 hover:text-foreground border-transparent pl-4 pr-3"
                 }`}
                 style={{
                   transitionDelay: isOpen ? `${index * 40}ms` : "0ms",
