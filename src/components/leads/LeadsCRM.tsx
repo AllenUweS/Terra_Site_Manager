@@ -1,0 +1,661 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Plus, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { type LeadRow, type LeadStatus } from "@/components/site-mapper/types";
+import { LeadFormDialog, type LeadFormValues } from "@/components/site-mapper/LeadFormDialog";
+import { NewLeadDialog, type NewLeadValues } from "./NewLeadDialog";
+import { LeadsStatCards } from "./LeadsStatCards";
+import { TeamsOverview, type TeamSummary } from "./TeamsOverview";
+import { EmployeesOverview, type EmployeeSummary } from "./EmployeesOverview";
+import { LeadsBoard, type ProjectOption } from "./LeadsBoard";
+import { LeadDetailDialog } from "./LeadDetailDialog";
+import { isOpen, getTemperature } from "./leadUtils";
+import type { EmployeeOption } from "./LeadCard";
+
+type Profile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  manager_id: string | null;
+};
+
+type View = "teams" | "all" | "team" | "employee";
+const UNASSIGNED_KEY = "__unassigned__";
+
+function computeStats(leads: LeadRow[]) {
+  return {
+    total: leads.length,
+    open: leads.filter((l) => isOpen(l.status)).length,
+    hot: leads.filter((l) => getTemperature(l) === "hot").length,
+    won: leads.filter((l) => l.status === "converted").length,
+  };
+}
+
+export function LeadsCRM({ userId }: { userId: string }) {
+  const qc = useQueryClient();
+
+  const [view, setView] = useState<View>("teams");
+  const [selectedManagerId, setSelectedManagerId] = useState<string | null>(null);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
+  const [viewingLead, setViewingLead] = useState<LeadRow | null>(null);
+
+  const { data: role, isLoading: roleLoading } = useQuery({
+    queryKey: ["role", userId],
+    queryFn: async () => {
+      const { data } = await supabase.rpc("get_primary_role", { _user_id: userId });
+      return (data as string) ?? "employee";
+    },
+  });
+
+  const isAdmin = role === "admin" || role === "super_admin";
+  const isManager = role === "manager";
+  const isPlainEmployee = !!role && !isAdmin && !isManager;
+
+  const { data: profiles, isLoading: profilesLoading } = useQuery({
+    queryKey: ["leads_profiles", role, userId],
+    enabled: !!role,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, manager_id");
+      if (error) throw error;
+      return (data ?? []) as Profile[];
+    },
+  });
+
+  const { data: userRoles } = useQuery({
+    queryKey: ["leads_user_roles", role],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("user_roles").select("user_id, role");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: leads, isLoading: leadsLoading } = useQuery({
+    queryKey: ["all_plot_leads"],
+    enabled: !!role,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("plot_leads")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as LeadRow[];
+    },
+  });
+
+  const { data: plots } = useQuery({
+    queryKey: ["leads_plots"],
+    enabled: !!role,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plots")
+        .select("id, plot_number, project_id, projects(name)");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: projectsList } = useQuery({
+    queryKey: ["leads_projects"],
+    enabled: !!role,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("projects").select("id, name").order("name");
+      if (error) throw error;
+      return (data ?? []) as ProjectOption[];
+    },
+  });
+
+  const isLoading = roleLoading || profilesLoading || leadsLoading;
+
+  const profileById = useMemo(() => {
+    const m = new Map<string, Profile>();
+    (profiles ?? []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [profiles]);
+
+  const roleOf = useMemo(() => {
+    const m = new Map<string, string>();
+    (userRoles ?? []).forEach((r: any) => {
+      // super_admin/admin outrank manager/employee if a user somehow has two rows
+      const existing = m.get(r.user_id);
+      const rank = (x: string) =>
+        (({ super_admin: 0, admin: 1, manager: 2, employee: 3 }) as any)[x] ?? 4;
+      if (!existing || rank(r.role) < rank(existing)) m.set(r.user_id, r.role);
+    });
+    return (id: string) => m.get(id) ?? "employee";
+  }, [userRoles]);
+
+  const plotById = useMemo(() => {
+    const m = new Map<string, any>();
+    (plots ?? []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [plots]);
+
+  const employeeNameOf = (id: string | null) => {
+    if (!id) return "Unassigned";
+    const p = profileById.get(id);
+    return p?.full_name || p?.email || "Unknown";
+  };
+
+  const projectById = useMemo(() => {
+    const m = new Map<string, ProjectOption>();
+    (projectsList ?? []).forEach((p) => m.set(p.id, p));
+    return m;
+  }, [projectsList]);
+
+  const projectNameOf = (id: string | null | undefined) =>
+    (id && projectById.get(id)?.name) || "Project";
+
+  const plotNumberOf = (lead: LeadRow) =>
+    plotById.get(lead.plot_id)?.plot_number as string | undefined;
+
+  const plotLabelOf = (lead: LeadRow) => {
+    const plot = plotById.get(lead.plot_id);
+    if (!plot) return undefined;
+    const projectName = (plot as any).projects?.name;
+    return projectName ? `${projectName} · Plot ${plot.plot_number}` : `Plot ${plot.plot_number}`;
+  };
+
+  const allLeads = useMemo(() => leads ?? [], [leads]);
+  const orgStats = useMemo(() => computeStats(allLeads), [allLeads]);
+
+  // ---- Build manager teams (admin only needs the full breakdown) ----
+  const teamSummaries: TeamSummary[] = useMemo(() => {
+    if (!isAdmin) return [];
+    const managers = (profiles ?? []).filter((p) => roleOf(p.id) === "manager");
+    return managers
+      .map((mgr) => {
+        const employeeIds = new Set(
+          (profiles ?? []).filter((p) => p.manager_id === mgr.id).map((p) => p.id),
+        );
+        const scopeIds = new Set([mgr.id, ...employeeIds]);
+        const teamLeads = allLeads.filter((l) => l.created_by && scopeIds.has(l.created_by));
+        const s = computeStats(teamLeads);
+        return {
+          managerId: mgr.id,
+          managerName: mgr.full_name || mgr.email || "Manager",
+          employeeCount: employeeIds.size,
+          leadCount: s.total,
+          hotCount: s.hot,
+          wonCount: s.won,
+        };
+      })
+      .sort((a, b) => b.leadCount - a.leadCount);
+  }, [isAdmin, profiles, roleOf, allLeads]);
+
+  const unassignedSummary: TeamSummary | null = useMemo(() => {
+    if (!isAdmin) return null;
+    const unassignedEmployees = (profiles ?? []).filter(
+      (p) => !p.manager_id && roleOf(p.id) === "employee",
+    );
+    const ids = new Set(unassignedEmployees.map((p) => p.id));
+    const teamLeads = allLeads.filter((l) => l.created_by && ids.has(l.created_by));
+    return {
+      managerId: UNASSIGNED_KEY,
+      managerName: "Unassigned",
+      employeeCount: unassignedEmployees.length,
+      leadCount: teamLeads.length,
+      hotCount: 0,
+      wonCount: 0,
+    };
+  }, [isAdmin, profiles, roleOf, allLeads]);
+
+  // ---- Resolve the "active" team (either drilled into, or the manager's own) ----
+  const activeManagerId = isManager ? userId : selectedManagerId;
+
+  const activeTeam = useMemo(() => {
+    if (!activeManagerId) return null;
+    if (activeManagerId === UNASSIGNED_KEY) {
+      const unassignedEmployees = (profiles ?? []).filter(
+        (p) => !p.manager_id && roleOf(p.id) === "employee",
+      );
+      return {
+        name: "Unassigned",
+        employees: unassignedEmployees,
+        scopeIds: new Set(unassignedEmployees.map((p) => p.id)),
+      };
+    }
+    const mgr = profileById.get(activeManagerId);
+    const employees = (profiles ?? []).filter((p) => p.manager_id === activeManagerId);
+    const scopeIds = new Set([activeManagerId, ...employees.map((p) => p.id)]);
+    return { name: mgr?.full_name || mgr?.email || "Team", employees, scopeIds };
+  }, [activeManagerId, profiles, profileById, roleOf]);
+
+  const teamLeads = useMemo(() => {
+    if (!activeTeam) return [];
+    return allLeads.filter((l) => l.created_by && activeTeam.scopeIds.has(l.created_by));
+  }, [activeTeam, allLeads]);
+
+  const scopedLeads = useMemo(() => {
+    if (selectedEmployeeId && selectedEmployeeId !== "ALL")
+      return teamLeads.filter((l) => l.created_by === selectedEmployeeId);
+    return teamLeads;
+  }, [teamLeads, selectedEmployeeId]);
+
+  const employeeSummaries: EmployeeSummary[] = useMemo(() => {
+    if (!activeTeam) return [];
+    return activeTeam.employees
+      .map((e) => {
+        const eLeads = allLeads.filter((l) => l.created_by === e.id);
+        const s = computeStats(eLeads);
+        return {
+          employeeId: e.id,
+          employeeName: e.full_name || e.email || "Employee",
+          leadCount: s.total,
+          hotCount: s.hot,
+          wonCount: s.won,
+        };
+      })
+      .sort((a, b) => b.leadCount - a.leadCount);
+  }, [activeTeam, allLeads]);
+
+  const myLeads = useMemo(
+    () => allLeads.filter((l) => l.created_by === userId),
+    [allLeads, userId],
+  );
+
+  // ---------------- Mutations ----------------
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["all_plot_leads"] });
+
+  const createLead = useMutation({
+    mutationFn: async (values: NewLeadValues) => {
+      const { error } = await (supabase as any).from("plot_leads").insert({
+        ...values,
+        created_by: userId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lead added");
+      setNewLeadOpen(false);
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to add lead"),
+  });
+
+  const updateLead = useMutation({
+    mutationFn: async ({ id, values }: { id: string; values: Partial<LeadFormValues> }) => {
+      const { error } = await (supabase as any).from("plot_leads").update(values).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lead updated");
+      setEditingLead(null);
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to update lead"),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: LeadStatus }) => {
+      const { error } = await (supabase as any).from("plot_leads").update({ status }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: invalidate,
+    onError: (e: any) => toast.error(e.message ?? "Failed to update status"),
+  });
+
+  const deleteLead = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await (supabase as any).from("plot_leads").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lead removed");
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to remove lead"),
+  });
+
+  const transferLead = useMutation({
+    mutationFn: async ({ id, newEmployeeId }: { id: string; newEmployeeId: string }) => {
+      const { error } = await (supabase as any)
+        .from("plot_leads")
+        .update({ created_by: newEmployeeId })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lead transferred");
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to transfer lead"),
+  });
+
+  const canManageLead = (lead: LeadRow) =>
+    isAdmin || lead.created_by === userId || lead.assigned_to === userId;
+
+  const transferOptionsFor = (lead: LeadRow): EmployeeOption[] => {
+    if (!isAdmin) return [];
+    const pool = activeTeam ? activeTeam.employees : (profiles ?? []);
+    return pool
+      .filter((p) => p.id !== lead.created_by)
+      .map((p) => ({ id: p.id, name: p.full_name || p.email || "Employee" }));
+  };
+
+  function goToTeams() {
+    setView("teams");
+    setSelectedManagerId(null);
+    setSelectedEmployeeId(null);
+  }
+  function goToTeam(managerId: string) {
+    setView("team");
+    setSelectedManagerId(managerId);
+    setSelectedEmployeeId(null);
+  }
+  function goToEmployee(employeeId: string) {
+    setView("employee");
+    setSelectedEmployeeId(employeeId);
+  }
+  function goToAll() {
+    setView("all");
+    setSelectedManagerId(null);
+    setSelectedEmployeeId(null);
+  }
+
+  const detailDialog = (
+    <LeadDetailDialog
+      lead={viewingLead}
+      employeeName={employeeNameOf(viewingLead?.created_by ?? null)}
+      plotNumber={viewingLead ? plotNumberOf(viewingLead) : undefined}
+      projectName={viewingLead ? projectNameOf(viewingLead.project_id) : undefined}
+      canManage={viewingLead ? canManageLead(viewingLead) : false}
+      userId={userId}
+      canCaptureVisit={
+        !!viewingLead && (viewingLead.assigned_to ?? viewingLead.created_by) === userId
+      }
+      canReviewVisits={isAdmin}
+      onOpenChange={(o) => !o && setViewingLead(null)}
+      onStatusChange={(id, status) => setStatus.mutate({ id, status })}
+      onEdit={(lead) => {
+        setViewingLead(null);
+        setEditingLead(lead);
+      }}
+    />
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center py-24 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading leads…
+      </div>
+    );
+  }
+
+  const addLeadButton = (
+    <Button
+      className="rounded-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white border-transparent shadow-md hover:shadow-lg transition-all duration-300"
+      onClick={() => setNewLeadOpen(true)}
+    >
+      <Plus className="h-4 w-4 mr-2" /> Add lead
+    </Button>
+  );
+
+  // ---------------- Plain employee: just their own leads ----------------
+  if (isPlainEmployee) {
+    const stats = computeStats(myLeads);
+    return (
+      <div className="space-y-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-display text-3xl">My leads</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {stats.total} lead{stats.total === 1 ? "" : "s"} you've added
+            </p>
+          </div>
+          {addLeadButton}
+        </div>
+
+        <LeadsStatCards {...stats} />
+
+        <LeadsBoard
+          leads={myLeads}
+          employeeNameOf={employeeNameOf}
+          plotLabelOf={plotLabelOf}
+          canManageLead={canManageLead}
+          projects={projectsList}
+          onOpenDetail={setViewingLead}
+          onStatusChange={(id, status) => setStatus.mutate({ id, status })}
+          onEdit={setEditingLead}
+        />
+
+        <NewLeadDialog
+          open={newLeadOpen}
+          pending={createLead.isPending}
+          onOpenChange={setNewLeadOpen}
+          onSubmit={(v) => createLead.mutate(v)}
+        />
+        <LeadFormDialog
+          open={!!editingLead}
+          mode="edit"
+          initial={editingLead}
+          pending={updateLead.isPending}
+          onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
+          onOpenChange={(o) => !o && setEditingLead(null)}
+        />
+        {detailDialog}
+      </div>
+    );
+  }
+
+  // ---------------- Manager: land straight on their own team ----------------
+  if (isManager) {
+    const isShowingEmployee = view === "employee" && selectedEmployeeId;
+    const stats = isShowingEmployee ? computeStats(scopedLeads) : computeStats(teamLeads);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-display text-3xl">My team's leads</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {stats.total} leads{" "}
+              {isShowingEmployee
+                ? "for this selection"
+                : `across ${employeeSummaries.length} employee${employeeSummaries.length === 1 ? "" : "s"}`}
+            </p>
+          </div>
+          {addLeadButton}
+        </div>
+
+        {isShowingEmployee && (
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
+            <button
+              onClick={() => {
+                setView("teams");
+                setSelectedEmployeeId(null);
+              }}
+              className="inline-flex items-center gap-1.5 hover:text-terracotta"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Team overview
+            </button>
+            <span>/</span>
+            <span className="font-medium text-foreground">
+              {selectedEmployeeId === "ALL" ? "Whole team" : employeeNameOf(selectedEmployeeId)}
+            </span>
+          </div>
+        )}
+
+        <LeadsStatCards {...stats} />
+
+        {!isShowingEmployee ? (
+          <EmployeesOverview
+            employees={employeeSummaries}
+            totalLeads={teamLeads.length}
+            onSelectEmployee={goToEmployee}
+            onSelectAll={() => goToEmployee("ALL")}
+          />
+        ) : (
+          <LeadsBoard
+            leads={scopedLeads}
+            employeeNameOf={employeeNameOf}
+            plotLabelOf={plotLabelOf}
+            canManageLead={canManageLead}
+            projects={projectsList}
+            onOpenDetail={setViewingLead}
+            onStatusChange={(id, status) => setStatus.mutate({ id, status })}
+            onEdit={setEditingLead}
+          />
+        )}
+
+        <NewLeadDialog
+          open={newLeadOpen}
+          pending={createLead.isPending}
+          onOpenChange={setNewLeadOpen}
+          onSubmit={(v) => createLead.mutate(v)}
+        />
+        <LeadFormDialog
+          open={!!editingLead}
+          mode="edit"
+          initial={editingLead}
+          pending={updateLead.isPending}
+          onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
+          onOpenChange={(o) => !o && setEditingLead(null)}
+        />
+        {detailDialog}
+      </div>
+    );
+  }
+
+  // ---------------- Admin / super admin: full Teams CRM ----------------
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-display text-3xl">Leads CRM</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            {orgStats.total} leads across your team
+          </p>
+        </div>
+        {addLeadButton}
+      </div>
+
+      {view === "teams" && (
+        <>
+          <LeadsStatCards {...orgStats} />
+          <TeamsOverview
+            teams={teamSummaries}
+            unassigned={unassignedSummary}
+            totalLeads={orgStats.total}
+            onSelectTeam={goToTeam}
+            onSelectAll={goToAll}
+            onSelectUnassigned={() => goToTeam(UNASSIGNED_KEY)}
+          />
+        </>
+      )}
+
+      {view === "all" && (
+        <div className="space-y-4">
+          <LeadsStatCards {...orgStats} />
+          <button
+            onClick={goToTeams}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-terracotta"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to teams
+          </button>
+          <LeadsBoard
+            leads={allLeads}
+            employeeNameOf={employeeNameOf}
+            plotLabelOf={plotLabelOf}
+            canManageLead={canManageLead}
+            transferOptionsFor={transferOptionsFor}
+            projects={projectsList}
+            onOpenDetail={setViewingLead}
+            onStatusChange={(id, status) => setStatus.mutate({ id, status })}
+            onTransfer={(id, newEmployeeId) => transferLead.mutate({ id, newEmployeeId })}
+            onEdit={setEditingLead}
+            onDelete={(id) => deleteLead.mutate(id)}
+          />
+        </div>
+      )}
+
+      {view === "team" && activeTeam && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
+            <button
+              onClick={goToTeams}
+              className="inline-flex items-center gap-1.5 hover:text-terracotta"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Teams
+            </button>
+            <span>/</span>
+            <span className="font-medium text-foreground">{activeTeam.name}'s Team</span>
+          </div>
+
+          <LeadsStatCards {...computeStats(teamLeads)} />
+
+          <EmployeesOverview
+            employees={employeeSummaries}
+            totalLeads={teamLeads.length}
+            onSelectEmployee={goToEmployee}
+            onSelectAll={() => goToEmployee("ALL")}
+          />
+        </div>
+      )}
+
+      {view === "employee" && activeTeam && selectedEmployeeId && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
+            <button
+              onClick={goToTeams}
+              className="inline-flex items-center gap-1.5 hover:text-terracotta"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Teams
+            </button>
+            <span>/</span>
+            <button
+              onClick={() => goToTeam(activeManagerId!)}
+              className="inline-flex items-center gap-1.5 hover:text-terracotta"
+            >
+              {activeTeam.name}'s Team
+            </button>
+            <span>/</span>
+            <span className="font-medium text-foreground">
+              {selectedEmployeeId === "ALL" ? "Whole team" : employeeNameOf(selectedEmployeeId)}
+            </span>
+          </div>
+
+          <LeadsStatCards {...computeStats(scopedLeads)} />
+
+          <LeadsBoard
+            leads={scopedLeads}
+            employeeNameOf={employeeNameOf}
+            plotLabelOf={plotLabelOf}
+            canManageLead={canManageLead}
+            transferOptionsFor={transferOptionsFor}
+            projects={projectsList}
+            onOpenDetail={setViewingLead}
+            onStatusChange={(id, status) => setStatus.mutate({ id, status })}
+            onTransfer={(id, newEmployeeId) => transferLead.mutate({ id, newEmployeeId })}
+            onEdit={setEditingLead}
+            onDelete={(id) => deleteLead.mutate(id)}
+          />
+        </div>
+      )}
+
+      <NewLeadDialog
+        open={newLeadOpen}
+        pending={createLead.isPending}
+        onOpenChange={setNewLeadOpen}
+        onSubmit={(v) => createLead.mutate(v)}
+      />
+      <LeadFormDialog
+        open={!!editingLead}
+        mode="edit"
+        initial={editingLead}
+        pending={updateLead.isPending}
+        onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
+        onOpenChange={(o) => !o && setEditingLead(null)}
+      />
+      {detailDialog}
+    </div>
+  );
+}

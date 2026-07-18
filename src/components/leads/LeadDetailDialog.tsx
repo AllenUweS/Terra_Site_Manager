@@ -1,0 +1,238 @@
+import type { ComponentType } from "react";
+import {
+  Phone,
+  MessageCircle,
+  Mail,
+  Calendar,
+  MapPin,
+  IndianRupee,
+  Flame,
+  Pencil,
+  StickyNote,
+} from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  LEAD_STATUS_LABEL,
+  LEAD_STATUS_ORDER,
+  LEAD_STATUS_PALETTE,
+  type LeadRow,
+  type LeadStatus,
+} from "@/components/site-mapper/types";
+import { formatShortDate, getTemperature, initials, tintFor } from "./leadUtils";
+import { MiniSiteMap } from "./MiniSiteMap";
+import { SiteVisitProofPanel } from "./SiteVisitProofPanel";
+
+function digitsOnly(phone: string) {
+  return phone.replace(/[^\d]/g, "");
+}
+
+function formatMeeting(iso: string) {
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function LeadDetailDialog({
+  lead,
+  employeeName,
+  plotNumber,
+  projectName,
+  canManage,
+  userId,
+  canCaptureVisit,
+  canReviewVisits,
+  onOpenChange,
+  onStatusChange,
+  onEdit,
+}: {
+  lead: LeadRow | null;
+  employeeName: string;
+  plotNumber?: string;
+  projectName?: string;
+  canManage: boolean;
+  userId: string;
+  canCaptureVisit: boolean;
+  canReviewVisits: boolean;
+  onOpenChange: (open: boolean) => void;
+  onStatusChange: (id: string, status: LeadStatus) => void;
+  onEdit?: (lead: LeadRow) => void;
+}) {
+  const open = !!lead;
+  const palette = lead ? LEAD_STATUS_PALETTE[lead.status] : null;
+  const temp = lead ? getTemperature(lead) : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto p-0 gap-0">
+        {lead && palette && (
+          <>
+            {/* ---- Lead details, always up top ---- */}
+            <DialogHeader className="px-6 pt-6 pb-4 space-y-4 text-left">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Avatar className="h-11 w-11 shrink-0 border border-border/60 shadow-sm">
+                    <AvatarFallback className={`text-sm font-bold ${tintFor(lead.created_by)}`}>
+                      {initials(lead.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <DialogTitle className="flex items-center gap-2 text-xl truncate">
+                      {lead.name}
+                      {temp === "hot" && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive shrink-0">
+                          <Flame className="h-2.5 w-2.5" /> Hot
+                        </span>
+                      )}
+                      {temp === "warm" && (
+                        <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+                          Warm
+                        </span>
+                      )}
+                    </DialogTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Added {formatShortDate(lead.created_at)} by {employeeName}
+                    </p>
+                  </div>
+                </div>
+
+                {canManage && onEdit && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 shrink-0"
+                    onClick={() => onEdit(lead)}
+                  >
+                    <Pencil className="h-3 w-3 mr-1.5" /> Edit
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`tel:${lead.phone}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1.5 text-xs font-medium hover:border-terracotta/40 hover:text-terracotta transition-colors"
+                >
+                  <Phone className="h-3 w-3" /> {lead.phone}
+                </a>
+                <a
+                  href={`https://wa.me/91${digitsOnly(lead.phone).slice(-10)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1.5 text-xs font-medium hover:border-plot-available/50 hover:text-plot-available transition-colors"
+                >
+                  <MessageCircle className="h-3 w-3" /> WhatsApp
+                </a>
+                {lead.email && (
+                  <a
+                    href={`mailto:${lead.email}`}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1.5 text-xs font-medium hover:border-terracotta/40 hover:text-terracotta transition-colors"
+                  >
+                    <Mail className="h-3 w-3" /> {lead.email}
+                  </a>
+                )}
+
+                <div className="ml-auto">
+                  <Select
+                    value={lead.status}
+                    onValueChange={(v) => onStatusChange(lead.id, v as LeadStatus)}
+                    disabled={!canManage}
+                  >
+                    <SelectTrigger
+                      className={`h-7 w-auto gap-1.5 border px-2.5 text-[11px] font-medium capitalize rounded-full ${palette.badge}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${palette.dot}`} />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEAD_STATUS_ORDER.map((s) => (
+                        <SelectItem key={s} value={s} className="text-xs">
+                          {LEAD_STATUS_LABEL[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                <Stat
+                  label="Budget"
+                  value={lead.budget ? `₹${Number(lead.budget).toLocaleString("en-IN")}` : "—"}
+                  icon={IndianRupee}
+                />
+                <Stat label="Source" value={lead.source ?? "—"} />
+                <Stat
+                  label="Meeting"
+                  value={lead.meeting_date ? formatMeeting(lead.meeting_date) : "—"}
+                  icon={Calendar}
+                />
+                <Stat
+                  label="Plot"
+                  value={plotNumber ? `${plotNumber}` : "Unassigned"}
+                  icon={MapPin}
+                />
+              </div>
+
+              {lead.notes && (
+                <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                  <StickyNote className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <p className="leading-relaxed">{lead.notes}</p>
+                </div>
+              )}
+            </DialogHeader>
+
+            {/* ---- Site map, mapped to the lead's project & plot ---- */}
+            <div className="px-6 pb-6 pt-1 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <MapPin className="h-3 w-3" /> Site location
+              </p>
+              <MiniSiteMap
+                projectId={lead.project_id}
+                plotId={lead.plot_id}
+                projectName={projectName}
+              />
+            </div>
+            <SiteVisitProofPanel
+              lead={lead}
+              userId={userId}
+              canCapture={canCaptureVisit}
+              canReview={canReviewVisits}
+            />
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon?: ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-card px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+        {Icon && <Icon className="h-2.5 w-2.5" />}
+        {label}
+      </p>
+      <p className="text-sm font-semibold mt-0.5 truncate">{value}</p>
+    </div>
+  );
+}
