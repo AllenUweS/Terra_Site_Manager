@@ -147,7 +147,7 @@ function InstallmentsPage() {
     reference_number: ""
   });
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "overdue" | "on_track" | "schedule_needed">("all");
+  const [filter, setFilter] = useState<"all" | "overdue" | "on_track" | "fully_paid" | "schedule_needed">("all");
 
   const { data: role } = useQuery({
     queryKey: ["role", user.id],
@@ -255,11 +255,15 @@ function InstallmentsPage() {
 
   const filteredBookings = bookings.filter((booking: any) => {
     const health = paymentHealth(booking, paymentsByBooking.get(booking.id) ?? []);
+    const isFullyPaid = Number(booking.total_price) - Number(booking.advance_paid) <= 0 || health.status === "fully_paid";
+
     const matchesFilter =
       filter === "all" ||
-      (filter === "overdue" && health.overdue > 0) ||
-      (filter === "on_track" && health.status === "on_track" && health.overdue <= 0) ||
-      (filter === "schedule_needed" && !health.scheduled);
+      (filter === "overdue" && health.overdue > 0 && !isFullyPaid) ||
+      (filter === "on_track" && health.status === "on_track" && health.overdue <= 0 && !isFullyPaid) ||
+      (filter === "fully_paid" && isFullyPaid) ||
+      (filter === "schedule_needed" && !health.scheduled && !isFullyPaid);
+
     const terms = `${booking.customer_name} ${booking.customer_phone} ${booking.plots?.projects?.name ?? ""} ${booking.plots?.plot_number ?? ""}`.toLowerCase();
     return matchesFilter && terms.includes(search.trim().toLowerCase());
   });
@@ -320,9 +324,20 @@ function InstallmentsPage() {
             {(
               [
                 ["all", "All", bookings.length],
-                ["overdue", "Overdue", bookings.filter((b: any) => paymentHealth(b, paymentsByBooking.get(b.id) ?? []).overdue > 0).length],
-                ["on_track", "On track", bookings.filter((b: any) => paymentHealth(b, paymentsByBooking.get(b.id) ?? []).status === "on_track").length],
-                ["schedule_needed", "Needs schedule", bookings.filter((b: any) => !paymentHealth(b, paymentsByBooking.get(b.id) ?? []).scheduled).length]
+                ["overdue", "Overdue", bookings.filter((b: any) => {
+                  const isPaid = Number(b.total_price) - Number(b.advance_paid) <= 0;
+                  return !isPaid && paymentHealth(b, paymentsByBooking.get(b.id) ?? []).overdue > 0;
+                }).length],
+                ["on_track", "On track", bookings.filter((b: any) => {
+                  const isPaid = Number(b.total_price) - Number(b.advance_paid) <= 0;
+                  const health = paymentHealth(b, paymentsByBooking.get(b.id) ?? []);
+                  return !isPaid && health.status === "on_track" && health.overdue <= 0;
+                }).length],
+                ["fully_paid", "Fully paid", bookings.filter((b: any) => Number(b.advance_paid) >= Number(b.total_price)).length],
+                ["schedule_needed", "Needs schedule", bookings.filter((b: any) => {
+                  const isPaid = Number(b.total_price) - Number(b.advance_paid) <= 0;
+                  return !isPaid && !paymentHealth(b, paymentsByBooking.get(b.id) ?? []).scheduled;
+                }).length]
               ] as const
             ).map(([value, label, count]) => (
               <Button
