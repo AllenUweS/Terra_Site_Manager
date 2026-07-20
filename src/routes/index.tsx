@@ -274,7 +274,7 @@ function ParallaxContactSection({
       id="contact"
       ref={sectionRef}
       aria-label="Contact"
-      className="relative overflow-hidden min-h-[90svh] h-auto my-12 md:my-20 py-12 md:py-0 transition-[clip-path] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
+      className="relative overflow-hidden min-h-[85vh] md:min-h-[95vh] my-16 md:my-28 py-12 md:py-16 flex items-center justify-center transition-[clip-path] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
       style={{
         clipPath: `inset(${insetY}% ${insetX}% round 16px)`,
       }}
@@ -291,7 +291,7 @@ function ParallaxContactSection({
         <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/30" />
       </div>
 
-      <div className="relative z-10 flex items-center h-full px-6 md:px-12 py-6">
+      <div className="relative z-10 flex items-center justify-center w-full px-6 md:px-12 py-8 md:py-12">
         <div className="mx-auto w-content-width">
           <FadeIn direction="up">
             <div className="w-full md:w-1/2 lg:w-5/12 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl p-6 md:p-10 shadow-2xl transition-all duration-500 hover:border-white/30 hover:bg-white/[0.13]">
