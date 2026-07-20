@@ -370,17 +370,29 @@ function AmbientAudioToggle() {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const toggleSound = () => {
+  const toggleSound = async () => {
     if (!audioRef.current) return;
     const a = audioRef.current;
+    
     if (isPlaying) {
       a.pause();
       setIsPlaying(false);
     } else {
-      a.volume = 0.35;
-      a.play()
-        .then(() => setIsPlaying(true))
-        .catch(() => setIsPlaying(false));
+      try {
+        a.volume = 0.5;
+        await a.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.error("Primary audio failed, switching to fallback:", err);
+        a.src = "https://actions.google.com/sounds/v1/water/lake_waves_gently_lapping.ogg";
+        try {
+          await a.play();
+          setIsPlaying(true);
+        } catch (e2) {
+          console.error("Audio playback error:", e2);
+          toast.error("Audio playback restricted by browser policy");
+        }
+      }
     }
   };
 
@@ -390,7 +402,7 @@ function AmbientAudioToggle() {
         ref={audioRef}
         loop
         preload="auto"
-        src="https://assets.mixkit.co/music/preview/mixkit-serene-view-443.mp3"
+        src="https://actions.google.com/sounds/v1/ambiences/coastal_surf.ogg"
       />
       <button
         onClick={toggleSound}
