@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { UserPlus, Save } from "lucide-react";
+import { UserPlus, MapPin, MapPinOff, Layers, Check, Loader2, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -21,7 +20,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LEAD_SOURCES } from "@/components/site-mapper/types";
+import {
+  LEAD_SOURCES,
+  STATUS_LABEL,
+  STATUS_PALETTE,
+  pointsAttr,
+  polygonCentroid,
+  type PlotRow,
+  type PlotStatus,
+  type Point,
+} from "@/components/site-mapper/types";
 
 export interface NewLeadValues {
   plot_id: string;
@@ -32,6 +40,26 @@ export interface NewLeadValues {
   source: string | null;
   budget: number | null;
   notes: string | null;
+}
+
+function useImageAspect(url: string | null | undefined) {
+  const [aspect, setAspect] = useState<number | null>(null);
+  useEffect(() => {
+    if (!url) {
+      setAspect(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setAspect(img.naturalWidth / img.naturalHeight);
+    };
+    img.src = url;
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+  return aspect;
 }
 
 export function NewLeadDialog({
@@ -47,6 +75,8 @@ export function NewLeadDialog({
 }) {
   const [projectId, setProjectId] = useState("");
   const [plotId, setPlotId] = useState("");
+  const [hoveredPlotId, setHoveredPlotId] = useState<string | null>(null);
+  const [plotFilter, setPlotFilter] = useState<"all" | "available" | "other">("all");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -58,6 +88,8 @@ export function NewLeadDialog({
     if (open) {
       setProjectId("");
       setPlotId("");
+      setHoveredPlotId(null);
+      setPlotFilter("all");
       setName("");
       setPhone("");
       setEmail("");
@@ -67,28 +99,61 @@ export function NewLeadDialog({
     }
   }, [open]);
 
-  const { data: projects } = useQuery({
+  // 1. Fetch available projects
+  const { data: projects, isLoading: projectsLoading } = useQuery({
     queryKey: ["leads-new-projects"],
     enabled: open,
     queryFn: async () => {
-      const { data, error } = await supabase.from("projects").select("id, name").order("name");
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, name, code, layout_image_url")
+        .order("name");
       if (error) throw error;
       return data ?? [];
     },
   });
 
-  const { data: plots } = useQuery({
+  const selectedProject = (projects ?? []).find((p) => p.id === projectId);
+  const layoutPath = selectedProject?.layout_image_url ?? null;
+
+  // 2. Fetch layout image signed URL
+  const { data: layoutUrl, isLoading: layoutUrlLoading } = useQuery({
+    queryKey: ["leads-layout-url", layoutPath],
+    enabled: !!layoutPath,
+    queryFn: async () => {
+      const { data } = await supabase.storage
+        .from("project-layouts")
+        .createSignedUrl(layoutPath!, 3600);
+      return data?.signedUrl ?? null;
+    },
+  });
+
+  // 3. Fetch plots for selected project
+  const { data: plots = [], isLoading: plotsLoading } = useQuery({
     queryKey: ["leads-new-plots", projectId],
     enabled: open && !!projectId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("plots")
-        .select("id, plot_number, status")
+        .select("*")
         .eq("project_id", projectId)
         .order("plot_number");
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as unknown as PlotRow[];
     },
+  });
+
+  const aspect = useImageAspect(layoutUrl);
+  const selectedPlot = plots.find((p) => p.id === plotId);
+
+  const mappedPlots = plots.filter(
+    (p) => p.polygon_coordinates && p.polygon_coordinates.length >= 3,
+  );
+
+  const filteredPlots = plots.filter((p) => {
+    if (plotFilter === "available") return p.status === "available";
+    if (plotFilter === "other") return p.status !== "available";
+    return true;
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -108,154 +173,310 @@ export function NewLeadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-display text-2xl">
             <UserPlus className="h-5 w-5 text-terracotta" />
             Add a lead
           </DialogTitle>
           <DialogDescription>
-            Log an interested buyer against a project and plot. You can manage their status from the
-            board afterwards.
+            Select a project to inspect its layout map, choose a plot directly on the map, and enter buyer details.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="grid gap-4">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Project <span className="text-terracotta">*</span>
+        <form onSubmit={handleSubmit} className="space-y-6 mt-2">
+          {/* STEP 1: PROJECT SELECTION */}
+          <div className="rounded-xl border bg-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-2">
+                <Layers className="h-4 w-4 text-terracotta" />
+                Step 1: Select Project <span className="text-terracotta">*</span>
               </Label>
-              <Select
-                value={projectId}
-                onValueChange={(v) => {
-                  setProjectId(v);
-                  setPlotId("");
-                }}
-              >
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder="Select project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(projects ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {projectId && (
+                <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                  <Check className="h-3.5 w-3.5" /> Project Selected
+                </span>
+              )}
             </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Plot <span className="text-terracotta">*</span>
-              </Label>
-              <Select value={plotId} onValueChange={setPlotId} disabled={!projectId}>
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder={projectId ? "Select plot" : "Pick a project first"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(plots ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      Plot {p.plot_number} · {p.status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Full name <span className="text-terracotta">*</span>
-              </Label>
-              <Input
-                className="mt-1.5"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Ramesh Kulkarni"
-                required
-              />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Phone <span className="text-terracotta">*</span>
-              </Label>
-              <Input
-                className="mt-1.5"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="10-digit mobile number"
-                required
-              />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Email
-              </Label>
-              <Input
-                type="email"
-                className="mt-1.5"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="optional"
-              />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                Budget (₹)
-              </Label>
-              <Input
-                type="number"
-                className="mt-1.5"
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                placeholder="optional"
-              />
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                How did they find us?
-              </Label>
-              <Select value={source} onValueChange={setSource}>
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {LEAD_SOURCES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Notes</Label>
-            <Textarea
-              className="mt-1.5"
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Requirements, family details, follow-up points…"
-            />
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={pending || !projectId || !plotId || !name.trim() || !phone.trim()}
-              className="bg-terracotta text-accent-foreground hover:bg-terracotta/90"
+            <Select
+              value={projectId}
+              onValueChange={(v) => {
+                setProjectId(v);
+                setPlotId("");
+                setHoveredPlotId(null);
+              }}
             >
-              <Save className="h-4 w-4 mr-1.5" />
-              {pending ? "Saving..." : "Add lead"}
-            </Button>
-          </DialogFooter>
+              <SelectTrigger className="w-full h-11 bg-background text-base font-medium">
+                <SelectValue placeholder={projectsLoading ? "Loading projects…" : "Choose a project to view layout map"} />
+              </SelectTrigger>
+              <SelectContent>
+                {(projects ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id} className="py-2.5">
+                    <span className="font-semibold">{p.name}</span>
+                    {p.code && <span className="ml-2 text-xs text-muted-foreground">({p.code})</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* STEP 2: INTERACTIVE LAYOUT MAP & PLOT SELECTION */}
+          {projectId && (
+            <div className="rounded-xl border bg-card p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-terracotta" />
+                    Step 2: Select Plot on Layout Map <span className="text-terracotta">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Click any plot on the layout map or grid below to select it for this lead.
+                  </p>
+                </div>
+
+                {selectedPlot && (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-terracotta/10 border border-terracotta/30 text-xs font-semibold text-terracotta">
+                    <Check className="h-3.5 w-3.5" /> Selected: Plot {selectedPlot.plot_number} ({STATUS_LABEL[selectedPlot.status as PlotStatus]})
+                  </div>
+                )}
+              </div>
+
+              {/* MAP DISPLAY AREA */}
+              {plotsLoading || layoutUrlLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-16 rounded-xl border border-dashed bg-muted/20 text-xs text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin text-terracotta" />
+                  Loading interactive layout map…
+                </div>
+              ) : layoutUrl && mappedPlots.length > 0 ? (
+                <div
+                  className="relative w-full overflow-hidden rounded-xl border border-border/80 bg-[radial-gradient(circle_at_1px_1px,color-mix(in_oklch,var(--foreground)_10%,transparent)_1px,transparent_0)] [background-size:16px_16px] shadow-inner select-none"
+                  style={{ aspectRatio: aspect ?? 16 / 9 }}
+                >
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    className="absolute inset-0 h-full w-full"
+                  >
+                    <defs>
+                      <filter id="plot-glow" x="-50%" y="-50%" width="200%" height="200%">
+                        <feGaussianBlur stdDeviation="1.5" result="blur" />
+                        <feMerge>
+                          <feMergeNode in="blur" />
+                          <feMergeNode in="SourceGraphic" />
+                        </feMerge>
+                      </filter>
+                    </defs>
+
+                    {/* Background Layout Image */}
+                    <image href={layoutUrl} x={0} y={0} width={100} height={100} preserveAspectRatio="none" />
+
+                    {/* Interactive Plot Polygons */}
+                    {mappedPlots.map((p) => {
+                      const isSelected = p.id === plotId;
+                      const isHovered = p.id === hoveredPlotId;
+                      const palette = STATUS_PALETTE[p.status as PlotStatus];
+
+                      return (
+                        <g key={p.id} className="cursor-pointer" onClick={() => setPlotId(p.id)} onMouseEnter={() => setHoveredPlotId(p.id)} onMouseLeave={() => setHoveredPlotId(null)}>
+                          <polygon
+                            points={pointsAttr(p.polygon_coordinates as Point[])}
+                            style={{
+                              fill: isSelected ? "color-mix(in oklch, var(--terracotta) 45%, transparent)" : palette.fill,
+                              stroke: isSelected ? "#ea580c" : isHovered ? "#3b82f6" : palette.stroke,
+                            }}
+                            strokeWidth={isSelected ? 1.5 : isHovered ? 1.2 : 0.45}
+                            opacity={isSelected ? 0.95 : isHovered ? 0.9 : 0.65}
+                            vectorEffect="non-scaling-stroke"
+                            filter={isSelected ? "url(#plot-glow)" : undefined}
+                          />
+
+                          {isSelected && (
+                            <polygon
+                              points={pointsAttr(p.polygon_coordinates as Point[])}
+                              fill="none"
+                              stroke="#ea580c"
+                              strokeWidth={2.5}
+                              vectorEffect="non-scaling-stroke"
+                              className="animate-pulse"
+                            />
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+
+                  {/* Centroid Pin for Selected or Hovered Plot */}
+                  {mappedPlots.map((p) => {
+                    const isSelected = p.id === plotId;
+                    const isHovered = p.id === hoveredPlotId;
+                    if (!isSelected && !isHovered) return null;
+                    const centroid = polygonCentroid(p.polygon_coordinates as Point[]);
+                    return (
+                      <div
+                        key={`pin-${p.id}`}
+                        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center"
+                        style={{ left: `${centroid.x}%`, top: `${centroid.y}%` }}
+                      >
+                        <div className={`px-2 py-0.5 rounded text-[10px] font-bold shadow-md whitespace-nowrap ${isSelected ? "bg-terracotta text-white" : "bg-black/80 text-white backdrop-blur-sm"}`}>
+                          Plot {p.plot_number} · {STATUS_LABEL[p.status as PlotStatus]}
+                        </div>
+                        <div className={`w-2 h-2 rounded-full mt-0.5 ${isSelected ? "bg-terracotta animate-ping" : "bg-blue-500"}`} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : layoutUrl ? (
+                <div className="relative overflow-hidden rounded-xl border bg-muted">
+                  <img src={layoutUrl} alt="Layout" className="w-full opacity-60 max-h-60 object-cover" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-background/50 text-center backdrop-blur-[1px]">
+                    <MapPinOff className="h-5 w-5 text-muted-foreground mb-1" />
+                    <p className="text-xs font-medium text-foreground">Layout map uploaded, but plots haven't been polygon-traced yet.</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">You can select a plot from the interactive plot grid below.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-muted/20 py-8 text-center">
+                  <MapPinOff className="h-5 w-5 text-muted-foreground/60" />
+                  <p className="text-xs text-muted-foreground">No layout map uploaded for this project yet.</p>
+                </div>
+              )}
+
+              {/* QUICK PLOT CHIPS SELECTION GRID */}
+              {plots.length > 0 && (
+                <div className="space-y-2 pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Plots ({plots.length})
+                    </span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <button type="button" onClick={() => setPlotFilter("all")} className={`px-2 py-0.5 rounded text-[11px] ${plotFilter === "all" ? "bg-terracotta text-white font-medium" : "bg-muted text-muted-foreground"}`}>All</button>
+                      <button type="button" onClick={() => setPlotFilter("available")} className={`px-2 py-0.5 rounded text-[11px] ${plotFilter === "available" ? "bg-terracotta text-white font-medium" : "bg-muted text-muted-foreground"}`}>Available</button>
+                      <button type="button" onClick={() => setPlotFilter("other")} className={`px-2 py-0.5 rounded text-[11px] ${plotFilter === "other" ? "bg-terracotta text-white font-medium" : "bg-muted text-muted-foreground"}`}>Booked/Sold</button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-muted/30 rounded-xl border">
+                    {filteredPlots.map((p) => {
+                      const isSelected = p.id === plotId;
+                      const palette = STATUS_PALETTE[p.status as PlotStatus];
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPlotId(p.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-terracotta text-white border-terracotta shadow-md scale-105"
+                              : "bg-background hover:bg-accent border-border text-foreground"
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${palette.dot}`} />
+                          Plot {p.plot_number}
+                          {p.price > 0 && <span className="opacity-75 text-[10px]">₹{(p.price / 100000).toFixed(1)}L</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP 3: LEAD DETAILS FORM */}
+          {projectId && plotId && (
+            <div className="rounded-xl border bg-card p-4 space-y-4">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-terracotta" />
+                Step 3: Buyer & Lead Details <span className="text-terracotta">*</span>
+              </Label>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="name" className="text-xs font-medium">Full Name <span className="text-terracotta">*</span></Label>
+                  <Input
+                    id="name"
+                    className="mt-1"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Ramesh Kulkarni"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="phone" className="text-xs font-medium">Phone Number <span className="text-terracotta">*</span></Label>
+                  <Input
+                    id="phone"
+                    className="mt-1"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="10-digit mobile number"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="email" className="text-xs font-medium">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    className="mt-1"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="ramesh@example.com"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="source" className="text-xs font-medium">Lead Source</Label>
+                  <Select value={source} onValueChange={setSource}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEAD_SOURCES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="budget" className="text-xs font-medium">Estimated Budget (₹)</Label>
+                  <Input
+                    id="budget"
+                    type="number"
+                    className="mt-1"
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value)}
+                    placeholder="e.g. 5000000"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="notes" className="text-xs font-medium">Notes & Buyer Requirements</Label>
+                <Textarea
+                  id="notes"
+                  className="mt-1 min-h-[80px]"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Interested in East-facing corner plot, looking to register within 30 days."
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={pending || !projectId || !plotId || !name.trim() || !phone.trim()}
+                className="w-full h-11 bg-terracotta text-white font-medium hover:bg-terracotta/90 transition-all text-base cursor-pointer shadow-md"
+              >
+                {pending ? "Adding Lead…" : "Submit & Add Lead"}
+              </Button>
+            </div>
+          )}
         </form>
       </DialogContent>
     </Dialog>
