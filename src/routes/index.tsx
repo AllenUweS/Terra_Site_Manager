@@ -368,76 +368,43 @@ function ParallaxContactSection({
 
 function AmbientAudioToggle() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const toggleSound = () => {
-    if (!audioCtxRef.current) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioCtxRef.current = ctx;
-
-      const masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(0, ctx.currentTime);
-      masterGain.connect(ctx.destination);
-      gainNodeRef.current = masterGain;
-
-      // Pure Warm Ambient Frequencies (132Hz - 528Hz Luxury Harmonics)
-      const freqs = [132, 198, 264, 396, 528];
-      freqs.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const oscGain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        
-        const baseVol = idx === 0 ? 0.03 : 0.01;
-        oscGain.gain.setValueAtTime(baseVol, ctx.currentTime);
-
-        osc.connect(oscGain);
-        oscGain.connect(masterGain);
-        osc.start();
-      });
-
-      // 0.08Hz LFO (12.5s Breathing Wave Swell)
-      const lfo = ctx.createOscillator();
-      const lfoGain = ctx.createGain();
-      lfo.frequency.setValueAtTime(0.08, ctx.currentTime);
-      lfoGain.gain.setValueAtTime(0.015, ctx.currentTime);
-      lfo.connect(lfoGain);
-      lfoGain.connect(masterGain.gain);
-      lfo.start();
-    }
-
-    const ctx = audioCtxRef.current;
-    const gain = gainNodeRef.current;
-    if (!ctx || !gain) return;
-
-    if (ctx.state === "suspended") {
-      ctx.resume();
-    }
-
+    if (!audioRef.current) return;
+    const a = audioRef.current;
     if (isPlaying) {
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
+      a.pause();
       setIsPlaying(false);
     } else {
-      gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 1.5);
-      setIsPlaying(true);
+      a.volume = 0.35;
+      a.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setIsPlaying(false));
     }
   };
 
   return (
-    <button
-      onClick={toggleSound}
-      title={isPlaying ? "Mute Ambient Sound" : "Play Ambient Sound"}
-      aria-label="Toggle ambient soundscape"
-      className="relative flex items-center justify-center size-9 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/15 hover:bg-white/20 transition-all duration-300 cursor-pointer opacity-75 hover:opacity-100"
-    >
-      <div className="flex items-end gap-[2px] h-3 w-3">
-        <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_100ms] h-full" : "h-1 opacity-50"}`} />
-        <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_300ms] h-3/4" : "h-2 opacity-50"}`} />
-        <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_200ms] h-full" : "h-1 opacity-50"}`} />
-      </div>
-    </button>
+    <>
+      <audio
+        ref={audioRef}
+        loop
+        preload="auto"
+        src="https://assets.mixkit.co/music/preview/mixkit-serene-view-443.mp3"
+      />
+      <button
+        onClick={toggleSound}
+        title={isPlaying ? "Mute Ambient Music" : "Play Ambient Music"}
+        aria-label="Toggle ambient luxury music"
+        className="relative flex items-center justify-center size-9 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/15 hover:bg-white/20 transition-all duration-300 cursor-pointer opacity-75 hover:opacity-100"
+      >
+        <div className="flex items-end gap-[2px] h-3 w-3">
+          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_100ms] h-full" : "h-1 opacity-50"}`} />
+          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_300ms] h-3/4" : "h-2 opacity-50"}`} />
+          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_200ms] h-full" : "h-1 opacity-50"}`} />
+        </div>
+      </button>
+    </>
   );
 }
 
