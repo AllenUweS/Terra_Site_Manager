@@ -366,60 +366,6 @@ function ParallaxContactSection({
   );
 }
 
-function AmbientAudioToggle() {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const toggleSound = async () => {
-    if (!audioRef.current) return;
-    const a = audioRef.current;
-    
-    if (isPlaying) {
-      a.pause();
-      setIsPlaying(false);
-    } else {
-      try {
-        a.volume = 0.5;
-        await a.play();
-        setIsPlaying(true);
-      } catch (err) {
-        console.error("Primary audio failed, switching to fallback:", err);
-        a.src = "https://actions.google.com/sounds/v1/water/lake_waves_gently_lapping.ogg";
-        try {
-          await a.play();
-          setIsPlaying(true);
-        } catch (e2) {
-          console.error("Audio playback error:", e2);
-          toast.error("Audio playback restricted by browser policy");
-        }
-      }
-    }
-  };
-
-  return (
-    <>
-      <audio
-        ref={audioRef}
-        loop
-        preload="auto"
-        src="https://actions.google.com/sounds/v1/ambiences/coastal_surf.ogg"
-      />
-      <button
-        onClick={toggleSound}
-        title={isPlaying ? "Mute Ambient Music" : "Play Ambient Music"}
-        aria-label="Toggle ambient luxury music"
-        className="relative flex items-center justify-center size-9 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/15 hover:bg-white/20 transition-all duration-300 cursor-pointer opacity-75 hover:opacity-100"
-      >
-        <div className="flex items-end gap-[2px] h-3 w-3">
-          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_100ms] h-full" : "h-1 opacity-50"}`} />
-          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_300ms] h-3/4" : "h-2 opacity-50"}`} />
-          <span className={`w-[2px] rounded-full bg-white transition-all duration-300 ${isPlaying ? "animate-[bounce_1s_infinite_200ms] h-full" : "h-1 opacity-50"}`} />
-        </div>
-      </button>
-    </>
-  );
-}
-
 function Index() {
   const [menuOpen, setMenuOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -567,7 +513,6 @@ function Index() {
         <div className="w-content-width mx-auto flex items-center justify-between relative z-[1100]">
           <Link to="/" className="text-xl font-medium text-white mix-blend-difference">Terra</Link>
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <AmbientAudioToggle />
             <Link
               to="/auth"
               className="flex items-center gap-1.5 h-9 px-3 sm:px-5 text-xs sm:text-sm rounded secondary-button hover:opacity-90 whitespace-nowrap"
