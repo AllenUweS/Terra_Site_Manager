@@ -382,43 +382,30 @@ function AmbientAudioToggle() {
       masterGain.connect(ctx.destination);
       gainNodeRef.current = masterGain;
 
-      [132, 264, 528].forEach((freq, idx) => {
+      // Pure Warm Ambient Frequencies (132Hz - 528Hz Luxury Harmonics)
+      const freqs = [132, 198, 264, 396, 528];
+      freqs.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const oscGain = ctx.createGain();
         osc.type = "sine";
         osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        oscGain.gain.setValueAtTime(idx === 0 ? 0.08 : 0.03, ctx.currentTime);
+        
+        const baseVol = idx === 0 ? 0.03 : 0.01;
+        oscGain.gain.setValueAtTime(baseVol, ctx.currentTime);
+
         osc.connect(oscGain);
         oscGain.connect(masterGain);
         osc.start();
       });
 
-      const bufferSize = ctx.sampleRate * 2;
-      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = noiseBuffer.getChannelData(0);
-      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + white * 0.0555179;
-        b1 = 0.99332 * b1 + white * 0.0750759;
-        b2 = 0.96900 * b2 + white * 0.1538520;
-        b3 = 0.86650 * b3 + white * 0.3104856;
-        b4 = 0.55000 * b4 + white * 0.5329522;
-        b5 = -0.7616 * b5 - white * 0.0168980;
-        output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
-        output[i] *= 0.012;
-        b6 = white * 0.115926;
-      }
-
-      const noise = ctx.createBufferSource();
-      noise.buffer = noiseBuffer;
-      noise.loop = true;
-      const filter = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(400, ctx.currentTime);
-      noise.connect(filter);
-      filter.connect(masterGain);
-      noise.start();
+      // 0.08Hz LFO (12.5s Breathing Wave Swell)
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.setValueAtTime(0.08, ctx.currentTime);
+      lfoGain.gain.setValueAtTime(0.015, ctx.currentTime);
+      lfo.connect(lfoGain);
+      lfoGain.connect(masterGain.gain);
+      lfo.start();
     }
 
     const ctx = audioCtxRef.current;
@@ -430,10 +417,10 @@ function AmbientAudioToggle() {
     }
 
     if (isPlaying) {
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.6);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
       setIsPlaying(false);
     } else {
-      gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 1.2);
+      gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 1.5);
       setIsPlaying(true);
     }
   };
