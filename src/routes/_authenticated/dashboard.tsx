@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import {
   FolderKanban,
   MapPin,
@@ -18,12 +19,16 @@ import {
   Award,
   Target,
   Zap,
+  Edit3,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { format, formatDistanceToNow, startOfMonth, endOfMonth, subMonths } from "date-fns";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -32,6 +37,13 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
 
 function Dashboard() {
   const { user } = Route.useRouteContext();
+
+  const [monthlyTarget, setMonthlyTarget] = useState<number>(() => {
+    const saved = localStorage.getItem("terra_monthly_target");
+    return saved ? Number(saved) : 5000000;
+  });
+  const [targetDialogOpen, setTargetDialogOpen] = useState(false);
+  const [inputTarget, setInputTarget] = useState(String(monthlyTarget));
 
   const { data: role } = useQuery({
     queryKey: ["role", user.id],
@@ -115,6 +127,24 @@ function Dashboard() {
       };
     },
   });
+
+  const isAdmin = role === "admin" || role === "super_admin";
+  const isManager = role === "manager";
+  const canSetTarget = isAdmin || isManager;
+
+  const saveTarget = () => {
+    const num = Number(inputTarget);
+    if (!isNaN(num) && num > 0) {
+      setMonthlyTarget(num);
+      localStorage.setItem("terra_monthly_target", String(num));
+      setTargetDialogOpen(false);
+      toast.success(`Monthly sales target set to ${money(num)}`);
+    } else {
+      toast.error("Please enter a valid target amount");
+    }
+  };
+
+  const achievementPercent = Math.min(100, Math.round(((stats?.thisMonthRevenue ?? 0) / monthlyTarget) * 100));
 
   const money = (amount: number) => `₹${(amount / 100000).toFixed(1)}L`;
   const formatMoney = (amount: number) => `₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -231,24 +261,50 @@ function Dashboard() {
       {/* Performance Overview */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5 text-terracotta" />
-              Sales Performance
-            </CardTitle>
-            <CardDescription>Booking activity and revenue trends</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-terracotta" />
+                Sales Performance
+              </CardTitle>
+              <CardDescription>
+                {canSetTarget
+                  ? `Monthly target: ${money(monthlyTarget)} (click Set Target to change)`
+                  : `Monthly target set by management: ${money(monthlyTarget)}`}
+              </CardDescription>
+            </div>
+            {canSetTarget ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setInputTarget(String(monthlyTarget));
+                  setTargetDialogOpen(true);
+                }}
+                className="h-8 text-xs border-terracotta/30 text-terracotta hover:bg-terracotta/10 cursor-pointer"
+              >
+                <Edit3 className="h-3.5 w-3.5 mr-1" />
+                Set Target
+              </Button>
+            ) : (
+              <Badge variant="outline" className="text-xs font-normal">
+                Target: {money(monthlyTarget)}
+              </Badge>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Monthly Target Achievement</span>
-                <span className="font-semibold">
-                  {Math.min(100, Math.round(((stats?.thisMonthRevenue ?? 0) / 5000000) * 100))}%
+                <span className="text-muted-foreground font-medium">
+                  Monthly Target Achievement ({formatMoney(stats?.thisMonthRevenue ?? 0)} of {formatMoney(monthlyTarget)})
+                </span>
+                <span className="font-semibold text-terracotta">
+                  {achievementPercent}%
                 </span>
               </div>
               <Progress
-                value={Math.min(100, Math.round(((stats?.thisMonthRevenue ?? 0) / 5000000) * 100))}
-                className="h-2"
+                value={achievementPercent}
+                className="h-2.5"
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
@@ -514,6 +570,68 @@ function Dashboard() {
           </Link>
         </div>
       )}
+
+      {/* SET TARGET DIALOG */}
+      <Dialog open={targetDialogOpen} onOpenChange={setTargetDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-terracotta" />
+              Set Monthly Sales Target
+            </DialogTitle>
+            <DialogDescription>
+              As an Admin / Manager, you can set the monthly revenue target for your sales team.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                Monthly Target Amount (₹)
+              </Label>
+              <Input
+                type="number"
+                min="100000"
+                step="500000"
+                value={inputTarget}
+                onChange={(e) => setInputTarget(e.target.value)}
+                className="mt-1.5 h-11 text-base font-semibold"
+                placeholder="e.g. 5000000 for ₹50 Lakhs"
+              />
+              <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+                <span>Presets:</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setInputTarget("2500000")}
+                    className="px-2 py-1 rounded bg-muted hover:bg-terracotta/10 hover:text-terracotta text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    ₹25L
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputTarget("5000000")}
+                    className="px-2 py-1 rounded bg-muted hover:bg-terracotta/10 hover:text-terracotta text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    ₹50L
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputTarget("10000000")}
+                    className="px-2 py-1 rounded bg-muted hover:bg-terracotta/10 hover:text-terracotta text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    ₹1 Cr
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={saveTarget} className="w-full h-11 bg-terracotta text-white font-medium hover:bg-terracotta/90 text-sm cursor-pointer shadow-md">
+              Save Monthly Target
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
