@@ -207,14 +207,20 @@ export function NewLeadDialog({
                 setHoveredPlotId(null);
               }}
             >
-              <SelectTrigger className="w-full h-11 bg-background text-base font-medium">
+              <SelectTrigger className="w-full h-11 bg-background text-sm font-medium rounded-xl border-border/80 shadow-sm hover:border-border transition-all">
                 <SelectValue placeholder={projectsLoading ? "Loading projects…" : "Choose a project to view layout map"} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="p-1.5 rounded-xl border-border/80 shadow-xl bg-popover">
                 {(projects ?? []).map((p) => (
-                  <SelectItem key={p.id} value={p.id} className="py-2.5">
-                    <span className="font-semibold">{p.name}</span>
-                    {p.code && <span className="ml-2 text-xs text-muted-foreground">({p.code})</span>}
+                  <SelectItem key={p.id} value={p.id} className="py-2.5 px-3 rounded-lg">
+                    <div className="flex items-center justify-between w-full gap-3">
+                      <span className="font-semibold text-sm">{p.name}</span>
+                      {p.code && (
+                        <span className="px-2 py-0.5 text-[11px] font-mono rounded-md bg-muted text-muted-foreground">
+                          {p.code}
+                        </span>
+                      )}
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
