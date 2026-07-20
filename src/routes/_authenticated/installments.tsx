@@ -87,6 +87,15 @@ function paymentHealth(booking: any, ledger: any[]) {
   const planExhausted = recordedCount >= plannedInstallments || (dueCountByDate >= plannedInstallments && paid < expectedByToday);
   const nextDue = !planExhausted && recordedCount < plannedInstallments ? addMonths(firstDue, recordedCount) : null;
 
+  // Target due date for calculating days late
+  const targetDueDate = planExhausted || recordedCount >= plannedInstallments
+    ? addMonths(firstDue, plannedInstallments - 1)
+    : addMonths(firstDue, recordedCount);
+  
+  const diffMs = today.getTime() - targetDueDate.getTime();
+  const daysOverdue = diffMs > 0 ? Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24))) : 0;
+  const daysText = daysOverdue > 0 ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"} late` : "Due today";
+
   // Scenario A: Plan Exhausted / All installments completed but balance remains!
   if (planExhausted || recordedCount >= plannedInstallments) {
     return {
@@ -97,9 +106,10 @@ function paymentHealth(booking: any, ledger: any[]) {
       scheduled: true,
       planExhausted: true,
       recordedCount,
+      daysOverdue,
       status: "overdue",
-      statusLabel: "Payment overdue",
-      subtext: `All ${plannedInstallments} installments completed · ${money(remaining)} balance is overdue`
+      statusLabel: `Payment overdue · ${daysText}`,
+      subtext: `Overdue by ${daysOverdue > 0 ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"}` : "today"} · All ${plannedInstallments} installments completed`
     };
   }
 
@@ -115,9 +125,10 @@ function paymentHealth(booking: any, ledger: any[]) {
       scheduled: true,
       planExhausted: false,
       recordedCount,
+      daysOverdue,
       status: "overdue",
-      statusLabel: "Payment overdue",
-      subtext: `${overdueInstallments} installment${overdueInstallments > 1 ? "s" : ""} overdue · ${money(expectedByToday)} expected by today`
+      statusLabel: `Payment overdue · ${daysText}`,
+      subtext: `Overdue by ${daysOverdue > 0 ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"}` : "today"} · ${overdueInstallments} installment${overdueInstallments > 1 ? "s" : ""} overdue`
     };
   }
 
@@ -130,6 +141,7 @@ function paymentHealth(booking: any, ledger: any[]) {
     scheduled: true,
     planExhausted: false,
     recordedCount,
+    daysOverdue: 0,
     status: "on_track",
     statusLabel: "On track",
     subtext: `${recordedCount} of ${plannedInstallments} installments paid · ${money(remaining)} remaining`
@@ -411,7 +423,7 @@ function InstallmentsPage() {
                       {health.overdue > 0 ? (
                         <>
                           <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
-                            <AlertTriangle className="h-3.5 w-3.5" /> Payment overdue
+                            <AlertTriangle className="h-3.5 w-3.5" /> {health.statusLabel}
                           </div>
                           <p className="mt-1 text-xl font-semibold text-destructive">{money(health.overdue)}</p>
                           <p className="mt-1 text-xs text-muted-foreground">{health.subtext}</p>
