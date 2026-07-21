@@ -95,15 +95,20 @@ function AuthedLayout() {
   return (
     <div className="min-h-screen flex bg-background">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col border-r bg-card">
-        <div className="p-6 border-b">
-          <Link to="/dashboard" className="text-display text-2xl">
+      <aside className="hidden md:flex w-64 flex-col border-r border-border/60 bg-card/85 backdrop-blur-xl relative overflow-hidden shadow-xs">
+        {/* Subtle Ambient Glow */}
+        <div className="pointer-events-none absolute -left-16 -top-16 h-40 w-40 rounded-full bg-terracotta/5 blur-3xl" />
+
+        <div className="p-6 border-b border-border/50">
+          <Link to="/dashboard" className="inline-flex items-center gap-2 text-display text-2xl font-bold text-ink dark:text-foreground group">
+            <span className="h-2 w-2 rounded-full bg-terracotta group-hover:scale-125 transition-transform" />
             Terra
           </Link>
-          <p className="text-xs text-muted-foreground mt-1 uppercase tracking-wider">
+          <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-[0.2em] font-medium">
             Developer Platform
           </p>
         </div>
+
         <nav className="flex-1 p-3 space-y-1">
           {visibleNav.map((item) => {
             const active =
@@ -114,27 +119,33 @@ function AuthedLayout() {
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 py-2 rounded-r-md text-sm border-l-2 transition-all duration-200 ${
+                className={`flex items-center gap-3 py-2.5 rounded-lg text-sm border-l-2 transition-all duration-200 ${
                   active
-                    ? "bg-terracotta/[0.06] text-terracotta font-semibold border-terracotta pl-3.5 pr-3"
-                    : "text-foreground/80 hover:bg-muted/60 hover:text-foreground border-transparent pl-4 pr-3"
+                    ? "bg-terracotta/[0.08] text-terracotta font-semibold border-terracotta shadow-xs backdrop-blur-xs pl-3.5 pr-3"
+                    : "text-foreground/75 hover:bg-muted/70 hover:text-foreground border-transparent pl-4 pr-3"
                 }`}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className={`h-4 w-4 ${active ? "text-terracotta" : "text-muted-foreground"}`} />
                 {item.label}
               </Link>
             );
           })}
         </nav>
-        <div className="p-3 border-t">
-          <div className="px-3 py-2">
-            <div className="text-sm font-medium truncate">{profile?.full_name ?? user.email}</div>
-            <div className="text-xs text-muted-foreground capitalize">
-              {role?.replace("_", " ")}
+
+        <div className="p-3 border-t border-border/50 bg-muted/20">
+          <div className="px-3 py-2 flex items-center gap-3">
+            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-terracotta to-amber-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+              {(profile?.full_name ?? user.email ?? "T").slice(0, 1).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate text-foreground">{profile?.full_name ?? user.email}</div>
+              <div className="text-[10px] text-muted-foreground capitalize font-medium">
+                {role?.replace("_", " ")}
+              </div>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start mt-1">
-            <LogOut className="h-4 w-4 mr-2" /> Sign out
+          <Button variant="ghost" size="sm" onClick={signOut} className="w-full justify-start mt-1 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+            <LogOut className="h-3.5 w-3.5 mr-2" /> Sign out
           </Button>
         </div>
       </aside>
@@ -222,8 +233,13 @@ function AuthedLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0">
-        <header className="md:hidden border-b p-4 flex items-center justify-between bg-card">
+      <main className="flex-1 min-w-0 bg-background relative overflow-hidden">
+        {/* Ambient Mesh Gradient Backdrops matching landing page */}
+        <div className="pointer-events-none fixed top-0 right-0 w-[600px] h-[600px] bg-gradient-to-bl from-terracotta/12 via-amber-500/8 to-transparent blur-[140px] -z-10" />
+        <div className="pointer-events-none fixed bottom-0 left-64 w-[600px] h-[600px] bg-gradient-to-tr from-emerald-500/10 via-teal-500/6 to-transparent blur-[140px] -z-10" />
+        <div className="pointer-events-none fixed top-1/2 left-1/3 w-[400px] h-[400px] bg-gradient-to-r from-sky-500/5 via-indigo-500/5 to-transparent blur-[120px] -z-10" />
+
+        <header className="md:hidden border-b border-border/60 p-4 flex items-center justify-between bg-card/85 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-3">
             {/* Hamburger Button */}
             <button
@@ -237,7 +253,7 @@ function AuthedLayout() {
                 <span className="block h-[2px] w-4 bg-foreground rounded transition-all duration-300 ease-out origin-center" />
               </div>
             </button>
-            <Link to="/dashboard" className="text-display text-xl">
+            <Link to="/dashboard" className="text-display text-xl font-bold">
               Terra
             </Link>
           </div>
@@ -245,7 +261,7 @@ function AuthedLayout() {
             <LogOut className="h-4 w-4" />
           </Button>
         </header>
-        <div className="max-w-7xl mx-auto p-6 md:p-10">
+        <div className="max-w-7xl mx-auto p-6 md:p-10 relative z-10">
           <Outlet />
         </div>
       </main>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save } from "lucide-react";
+import { Save, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -109,6 +109,8 @@ export function PlotFormDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [form, setForm] = useState<FormState>(emptyForm);
+  const isStatusLocked = initial?.status === "sold" || initial?.status === "booked";
+
 
   useEffect(() => {
     if (open) setForm(toFormState(initial));
@@ -288,12 +290,13 @@ export function PlotFormDialog({
                   <button
                     key={s}
                     type="button"
-                    onClick={() => set("status", s)}
+                    disabled={isStatusLocked}
+                    onClick={() => !isStatusLocked && set("status", s)}
                     className={`rounded-md border px-3 py-2 text-xs font-medium capitalize transition ${
                       active
                         ? "border-terracotta bg-terracotta/10 text-terracotta"
                         : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
+                    } ${isStatusLocked ? "cursor-not-allowed opacity-60" : ""}`}
                   >
                     <span
                       className={`inline-block h-1.5 w-1.5 rounded-full mr-1.5 ${STATUS_PALETTE[s].dot}`}
@@ -303,6 +306,12 @@ export function PlotFormDialog({
                 );
               })}
             </div>
+            {isStatusLocked && (
+              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                <Lock className="h-3 w-3 shrink-0" />
+                Status is locked for {initial?.status} plots. To alter status, update the booking pipeline.
+              </p>
+            )}
           </Field>
 
           <div className="flex items-center gap-2">

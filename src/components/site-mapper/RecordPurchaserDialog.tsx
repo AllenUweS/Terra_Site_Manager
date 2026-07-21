@@ -1,0 +1,336 @@
+import { useEffect, useState } from "react";
+import { UserCheck, Phone, Mail, IndianRupee } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import type { PlotRow, PurchaserRecord } from "./types";
+
+interface RecordPurchaserDialogProps {
+  open: boolean;
+  plot: PlotRow;
+  userId: string;
+  existingPurchaser?: PurchaserRecord | null;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+}
+
+export function RecordPurchaserDialog({
+  open,
+  plot,
+  userId,
+  existingPurchaser,
+  onOpenChange,
+  onSuccess,
+}: RecordPurchaserDialogProps) {
+  const qc = useQueryClient();
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    customer_name: "",
+    customer_phone: "",
+    customer_email: "",
+    customer_address: "",
+    total_price: "",
+    advance_paid: "",
+    payment_method: "Bank transfer",
+    booking_date: new Date().toISOString().split("T")[0],
+    remarks: "",
+  });
+
+  useEffect(() => {
+    if (open) {
+      if (existingPurchaser) {
+        setForm({
+          customer_name: existingPurchaser.customer_name || "",
+          customer_phone: existingPurchaser.customer_phone || "",
+          customer_email: existingPurchaser.customer_email || "",
+          customer_address: existingPurchaser.customer_address || "",
+          total_price: (existingPurchaser.total_price ?? plot.price).toString(),
+          advance_paid: (existingPurchaser.advance_paid ?? plot.price).toString(),
+          payment_method: existingPurchaser.payment_method || "Bank transfer",
+          booking_date: existingPurchaser.booking_date
+            ? existingPurchaser.booking_date.split("T")[0]
+            : new Date().toISOString().split("T")[0],
+          remarks: existingPurchaser.remarks || "",
+        });
+      } else {
+        setForm({
+          customer_name: "",
+          customer_phone: "",
+          customer_email: "",
+          customer_address: "",
+          total_price: plot.price ? plot.price.toString() : "",
+          advance_paid: plot.price ? plot.price.toString() : "",
+          payment_method: "Bank transfer",
+          booking_date: new Date().toISOString().split("T")[0],
+          remarks: "",
+        });
+      }
+    }
+  }, [open, plot, existingPurchaser]);
+
+  const set = (key: keyof typeof form, val: string) =>
+    setForm((f) => ({ ...f, [key]: val }));
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.customer_name.trim()) return toast.error("Customer name is required");
+    if (!form.customer_phone.trim()) return toast.error("Customer phone is required");
+
+    setSubmitting(true);
+    try {
+      const totalPriceNum = parseFloat(form.total_price) || plot.price || 0;
+      const advancePaidNum = parseFloat(form.advance_paid) || totalPriceNum;
+
+      if (existingPurchaser?.id) {
+        // Update existing booking record
+        const { error: bookingErr } = await (supabase as any)
+          .from("bookings")
+          .update({
+            customer_name: form.customer_name.trim(),
+            customer_phone: form.customer_phone.trim(),
+            customer_email: form.customer_email.trim() || null,
+            customer_address: form.customer_address.trim() || null,
+            total_price: totalPriceNum,
+            booking_amount: advancePaidNum,
+            advance_paid: advancePaidNum,
+            payment_method: form.payment_method,
+            booking_date: form.booking_date,
+            remarks: form.remarks.trim() || null,
+          })
+          .eq("id", existingPurchaser.id);
+
+        if (bookingErr) throw bookingErr;
+      } else {
+        // Insert new approved booking for this sold plot
+        const { error: bookingErr } = await (supabase as any).from("bookings").insert({
+          plot_id: plot.id,
+          customer_name: form.customer_name.trim(),
+          customer_phone: form.customer_phone.trim(),
+          customer_email: form.customer_email.trim() || null,
+          customer_address: form.customer_address.trim() || null,
+          sales_executive_id: userId,
+          created_by: userId,
+          total_price: totalPriceNum,
+          booking_amount: advancePaidNum,
+          advance_paid: advancePaidNum,
+          payment_method: form.payment_method,
+          booking_date: form.booking_date,
+          status: "approved",
+          remarks: form.remarks.trim() || "Recorded directly via project site mapper",
+        });
+
+        if (bookingErr) throw bookingErr;
+
+        // Ensure plot status is set to 'sold'
+        if (plot.status !== "sold") {
+          const { error: plotErr } = await supabase
+            .from("plots")
+            .update({ status: "sold" })
+            .eq("id", plot.id);
+          if (plotErr) throw plotErr;
+        }
+      }
+
+      toast.success(
+        existingPurchaser ? "Purchaser info updated!" : "Purchaser details recorded successfully!"
+      );
+      qc.invalidateQueries({ queryKey: ["plots", plot.project_id] });
+      qc.invalidateQueries({ queryKey: ["plot-purchaser", plot.id] });
+      qc.invalidateQueries({ queryKey: ["bookings"] });
+      onOpenChange(false);
+      if (onSuccess) onSuccess();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to record purchaser information");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <UserCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg">
+                  {existingPurchaser ? "Edit Purchaser Info" : "Record Purchaser Info"}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Plot <span className="font-semibold text-foreground">{plot.plot_number}</span> · Register the owner details for this sold plot.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="grid gap-3 py-4 text-xs">
+            <div>
+              <Label className="text-xs font-medium">Customer Full Name *</Label>
+              <div className="relative mt-1">
+                <Input
+                  required
+                  placeholder="e.g. Ramesh Kumar"
+                  value={form.customer_name}
+                  onChange={(e) => set("customer_name", e.target.value)}
+                  className="pl-8 text-xs"
+                />
+                <UserCheck className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs font-medium">Phone Number *</Label>
+                <div className="relative mt-1">
+                  <Input
+                    required
+                    placeholder="+91 98765 43210"
+                    value={form.customer_phone}
+                    onChange={(e) => set("customer_phone", e.target.value)}
+                    className="pl-8 text-xs"
+                  />
+                  <Phone className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">Email Address</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type="email"
+                    placeholder="ramesh@example.com"
+                    value={form.customer_email}
+                    onChange={(e) => set("customer_email", e.target.value)}
+                    className="pl-8 text-xs"
+                  />
+                  <Mail className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-medium">Customer Address</Label>
+              <div className="relative mt-1">
+                <Textarea
+                  rows={2}
+                  placeholder="Street, City, Pin code"
+                  value={form.customer_address}
+                  onChange={(e) => set("customer_address", e.target.value)}
+                  className="text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs font-medium">Total Purchase Price (₹)</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type="number"
+                    placeholder="4500000"
+                    value={form.total_price}
+                    onChange={(e) => set("total_price", e.target.value)}
+                    className="pl-8 text-xs"
+                  />
+                  <IndianRupee className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">Advance Paid (₹)</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type="number"
+                    placeholder="500000"
+                    value={form.advance_paid}
+                    onChange={(e) => set("advance_paid", e.target.value)}
+                    className="pl-8 text-xs"
+                  />
+                  <IndianRupee className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs font-medium">Payment Method</Label>
+                <Select
+                  value={form.payment_method}
+                  onValueChange={(val) => set("payment_method", val)}
+                >
+                  <SelectTrigger className="h-8 text-xs mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Bank transfer" className="text-xs">Bank Transfer (NEFT/RTGS)</SelectItem>
+                    <SelectItem value="UPI" className="text-xs">UPI / GPay / PhonePe</SelectItem>
+                    <SelectItem value="Cheque" className="text-xs">Cheque</SelectItem>
+                    <SelectItem value="Cash" className="text-xs">Cash</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">Sale / Booking Date</Label>
+                <div className="relative mt-1">
+                  <Input
+                    type="date"
+                    value={form.booking_date}
+                    onChange={(e) => set("booking_date", e.target.value)}
+                    className="text-xs h-8"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-medium">Remarks / Registration Notes</Label>
+              <Textarea
+                rows={2}
+                placeholder="Registration details, deed numbers, or special terms..."
+                value={form.remarks}
+                onChange={(e) => set("remarks", e.target.value)}
+                className="text-xs mt-1"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={submitting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {submitting ? "Saving..." : existingPurchaser ? "Update Owner Details" : "Save Purchaser Info"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

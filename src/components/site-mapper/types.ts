@@ -195,3 +195,29 @@ export function pointsAttr(pts: Point[]) {
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+export interface PurchaserRecord {
+  id?: string;
+  plot_id?: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email?: string | null;
+  customer_address?: string | null;
+  total_price?: number | null;
+  booking_amount?: number | null;
+  advance_paid?: number | null;
+  booking_date?: string | null;
+  payment_method?: string | null;
+  status?: string | null;
+  remarks?: string | null;
+  sales_executive?: {
+    full_name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
+  lead?: {
+    source?: string | null;
+    notes?: string | null;
+  } | null;
+}
+

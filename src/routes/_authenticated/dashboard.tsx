@@ -60,20 +60,20 @@ function Dashboard() {
       const [projects, plots, bookings, leads, messages, incentives, profiles] = await Promise.all([
         supabase.from("projects").select("id, status, created_at"),
         supabase.from("plots").select("id, status, price, project_id"),
-        supabase.from("bookings").select("id, status, total_price, booking_amount, booking_date, created_at, sales_executive_id"),
-        supabase.from("plot_leads").select("id, name, status, created_at"),
+        (supabase as any).from("bookings").select("id, status, total_price, booking_amount, incentive_amount, booking_date, created_at, sales_executive_id, customer_name, customer_phone, plots(plot_number, projects(name, code))").order("created_at", { ascending: false }),
+        (supabase as any).from("plot_leads").select("id, name, status, created_at"),
         supabase.from("contact_messages").select("id, status, created_at"),
-        supabase.from("incentive_grants").select("id, amount, granted_at"),
-        supabase.from("profiles").select("id, full_name, role"),
+        (supabase as any).from("incentive_grants").select("id, amount, granted_at"),
+        (supabase as any).from("profiles").select("id, full_name, job_title"),
       ]);
 
       const p = projects.data ?? [];
       const pl = plots.data ?? [];
-      const b = bookings.data ?? [];
-      const l = leads.data ?? [];
+      const b = (bookings as any).data ?? [];
+      const l = (leads as any).data ?? [];
       const m = messages.data ?? [];
-      const i = incentives.data ?? [];
-      const prof = profiles.data ?? [];
+      const i = (incentives as any).data ?? [];
+      const prof = (profiles.data ?? []) as any[];
 
       // Calculate monthly revenue
       const now = new Date();
@@ -83,18 +83,18 @@ function Dashboard() {
       const lastMonthEnd = endOfMonth(subMonths(now, 1));
 
       const thisMonthRevenue = b
-        .filter((x) => {
+        .filter((x: any) => {
           const date = new Date(x.created_at);
-          return x.status === "approved" && date >= thisMonthStart && date <= thisMonthEnd;
+          return (x.status === "approved" || x.status === "completed") && date >= thisMonthStart && date <= thisMonthEnd;
         })
-        .reduce((s, x) => s + Number(x.total_price ?? 0), 0);
+        .reduce((s: number, x: any) => s + Number(x.total_price ?? 0), 0);
 
       const lastMonthRevenue = b
-        .filter((x) => {
+        .filter((x: any) => {
           const date = new Date(x.created_at);
-          return x.status === "approved" && date >= lastMonthStart && date <= lastMonthEnd;
+          return (x.status === "approved" || x.status === "completed") && date >= lastMonthStart && date <= lastMonthEnd;
         })
-        .reduce((s, x) => s + Number(x.total_price ?? 0), 0);
+        .reduce((s: number, x: any) => s + Number(x.total_price ?? 0), 0);
 
       const revenueGrowth = lastMonthRevenue > 0
         ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
@@ -102,26 +102,28 @@ function Dashboard() {
 
       return {
         totalProjects: p.length,
-        liveProjects: p.filter((x) => x.status === "live").length,
+        liveProjects: p.filter((x) => x.status === "live" || !x.status).length,
         upcomingProjects: p.filter((x) => x.status === "upcoming").length,
         totalPlots: pl.length,
         availablePlots: pl.filter((x) => x.status === "available").length,
         bookedPlots: pl.filter((x) => x.status === "booked" || x.status === "sold").length,
         pendingPlots: pl.filter((x) => x.status === "pending").length,
         totalBookings: b.length,
-        approvedBookings: b.filter((x) => x.status === "approved").length,
-        pendingBookings: b.filter((x) => x.status === "pending").length,
-        totalRevenue: b.filter((x) => x.status === "approved").reduce((s, x) => s + Number(x.total_price ?? 0), 0),
+        approvedBookings: b.filter((x: any) => x.status === "approved" || x.status === "completed").length,
+        pendingBookings: b.filter((x: any) => x.status === "pending").length,
+        totalRevenue: b.filter((x: any) => x.status === "approved" || x.status === "completed").reduce((s: number, x: any) => s + Number(x.total_price ?? 0), 0),
         thisMonthRevenue,
         lastMonthRevenue,
         revenueGrowth,
         totalLeads: l.length,
-        newLeads: l.filter((x) => x.status === "new").length,
-        qualifiedLeads: l.filter((x) => x.status === "qualified").length,
+        newLeads: l.filter((x: any) => x.status === "new").length,
+        qualifiedLeads: l.filter((x: any) => x.status !== "new" && x.status !== "dropped").length,
         totalMessages: m.length,
-        unreadMessages: m.filter((x) => x.status === "new").length,
-        totalIncentivesPaid: i.reduce((s, x) => s + Number(x.amount), 0),
-        totalEmployees: prof.filter((x) => x.role === "employee").length,
+        unreadMessages: m.filter((x) => x.status === "new" || x.status === "unread" || !x.status).length,
+        totalIncentivesPaid: i.length > 0 
+          ? i.reduce((s: number, x: any) => s + Number(x.amount ?? 0), 0)
+          : b.reduce((s: number, x: any) => s + Number(x.incentive_amount ?? 0), 0),
+        totalEmployees: prof.length,
         recentBookings: b.slice(0, 5),
         recentLeads: l.slice(0, 5),
       };
@@ -146,8 +148,24 @@ function Dashboard() {
 
   const achievementPercent = Math.min(100, Math.round(((stats?.thisMonthRevenue ?? 0) / monthlyTarget) * 100));
 
-  const money = (amount: number) => `₹${(amount / 100000).toFixed(1)}L`;
-  const formatMoney = (amount: number) => `₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  const formatMoney = (amount: number) => {
+    if (!amount || isNaN(amount)) return "₹0";
+    if (amount >= 10000000) {
+      const cr = amount / 10000000;
+      return `₹${cr >= 100 ? cr.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : cr.toFixed(2)} Cr`;
+    }
+    if (amount >= 100000) {
+      const lakh = amount / 100000;
+      return `₹${lakh >= 100 ? lakh.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : lakh.toFixed(1)}L`;
+    }
+    if (amount >= 1000) {
+      const k = amount / 1000;
+      return `₹${k.toFixed(1)}k`;
+    }
+    return `₹${amount.toLocaleString("en-IN")}`;
+  };
+
+  const money = (amount: number) => formatMoney(amount);
 
   const getInitials = (name: string) =>
     name
@@ -159,99 +177,120 @@ function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-baseline justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Dashboard</p>
-          <h1 className="mt-1 text-display text-4xl">
-            {format(new Date(), "EEEE, MMMM d")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Welcome back! Here's what's happening today.
-          </p>
+      {/* Glassmorphic Hero Studio Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-terracotta/20 bg-gradient-to-r from-terracotta/[0.08] via-card to-amber-500/[0.06] p-6 shadow-xs backdrop-blur-xl">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-terracotta/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-16 -bottom-16 h-48 w-48 rounded-full bg-amber-500/10 blur-3xl" />
+
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative z-10">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-terracotta/30 bg-terracotta/10 px-2.5 py-0.5 text-[11px] font-semibold text-terracotta">
+                <Sparkles className="h-3 w-3 text-terracotta animate-pulse" />
+                TERRA STUDIO
+              </span>
+              <span className="text-xs text-muted-foreground font-medium">
+                {format(new Date(), "EEEE, MMMM d, yyyy")}
+              </span>
+            </div>
+            <h1 className="mt-2 text-display text-3xl md:text-4xl font-bold tracking-tight text-ink dark:text-foreground">
+              Developer Command Center
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground max-w-xl">
+              Track project performance, plot bookings, sales revenue, and customer inquiries in real-time.
+            </p>
+          </div>
+
+          {role && (
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl border border-border/60 bg-card/85 px-4 py-2.5 backdrop-blur-md text-right shadow-2xs">
+                <p className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Access Profile</p>
+                <p className="text-sm font-bold text-terracotta capitalize">{role.replace("_", " ")}</p>
+              </div>
+            </div>
+          )}
         </div>
-        {role && (
-          <Badge className="bg-terracotta/10 text-terracotta border-terracotta/20">
-            {role.replace("_", " ")}
-          </Badge>
-        )}
       </div>
 
       {/* Quick Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="border border-border/50 hover:border-terracotta/40 hover:-translate-y-0.5 transition-all duration-300 shadow-xs hover:shadow-md group">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Total Revenue</p>
-                <p className="text-2xl font-semibold text-display mt-1 text-ink dark:text-foreground">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="border border-terracotta/20 bg-gradient-to-b from-card/90 via-card/75 to-card/90 backdrop-blur-xl hover:border-terracotta/50 hover:-translate-y-1 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(224,90,56,0.15)] rounded-2xl group overflow-hidden relative">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-terracotta/10 blur-xl group-hover:bg-terracotta/20 transition-colors" />
+          <CardContent className="p-5 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground truncate">Total Revenue</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-display mt-1 bg-gradient-to-r from-ink via-terracotta to-ink dark:from-white dark:via-terracotta dark:to-white bg-clip-text text-transparent truncate">
                   {money(stats?.totalRevenue ?? 0)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1.5">
+                <p className="text-xs text-muted-foreground mt-2 truncate">
                   {stats?.revenueGrowth && stats.revenueGrowth > 0 ? (
-                    <span className="text-emerald-600 font-medium">↑ {stats.revenueGrowth.toFixed(0)}% vs last month</span>
+                    <span className="text-emerald-600 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">↑ {stats.revenueGrowth.toFixed(0)}% vs last month</span>
                   ) : (
-                    <span className="text-muted-foreground">All time</span>
+                    <span className="text-muted-foreground font-medium">All time approved</span>
                   )}
                 </p>
               </div>
-              <div className="rounded-lg bg-terracotta/10 p-2.5 text-terracotta group-hover:bg-terracotta group-hover:text-white transition-colors duration-300">
-                <IndianRupee className="h-5 w-5" />
+              <div className="shrink-0 rounded-2xl bg-gradient-to-br from-terracotta via-amber-600 to-terracotta text-white p-3.5 shadow-[0_6px_20px_rgba(224,90,56,0.35)] group-hover:scale-110 transition-transform duration-300">
+                <IndianRupee className="h-6 w-6" />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border border-border/50 hover:border-terracotta/40 hover:-translate-y-0.5 transition-all duration-300 shadow-xs hover:shadow-md group">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Active Bookings</p>
-                <p className="text-2xl font-semibold text-display mt-1 text-ink dark:text-foreground">{stats?.approvedBookings ?? 0}</p>
-                <p className="text-xs text-muted-foreground mt-1.5">
+        <Card className="border border-emerald-500/20 bg-gradient-to-b from-card/90 via-card/75 to-card/90 backdrop-blur-xl hover:border-emerald-500/50 hover:-translate-y-1 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(16,185,129,0.15)] rounded-2xl group overflow-hidden relative">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-emerald-500/10 blur-xl group-hover:bg-emerald-500/20 transition-colors" />
+          <CardContent className="p-5 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground truncate">Active Bookings</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-display mt-1 text-emerald-600 dark:text-emerald-400 truncate">{stats?.approvedBookings ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-2 truncate">
                   {stats?.pendingBookings && stats.pendingBookings > 0 ? (
-                    <span className="text-terracotta font-medium">{stats.pendingBookings} pending approval</span>
+                    <span className="text-terracotta font-semibold bg-terracotta/10 px-2 py-0.5 rounded-full border border-terracotta/20">{stats.pendingBookings} pending approval</span>
                   ) : (
-                    <span>No pending approvals</span>
+                    <span className="text-muted-foreground font-medium">No pending approvals</span>
                   )}
                 </p>
               </div>
-              <div className="rounded-lg bg-terracotta/10 p-2.5 text-terracotta group-hover:bg-terracotta group-hover:text-white transition-colors duration-300">
-                <ClipboardCheck className="h-5 w-5" />
+              <div className="shrink-0 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-600 text-white p-3.5 shadow-[0_6px_20px_rgba(16,185,129,0.35)] group-hover:scale-110 transition-transform duration-300">
+                <ClipboardCheck className="h-6 w-6" />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border border-border/50 hover:border-terracotta/40 hover:-translate-y-0.5 transition-all duration-300 shadow-xs hover:shadow-md group">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Available Plots</p>
-                <p className="text-2xl font-semibold text-display mt-1 text-ink dark:text-foreground">{stats?.availablePlots ?? 0}</p>
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  <span className="font-medium text-ink/75 dark:text-foreground/75">{stats?.bookedPlots ?? 0}</span> already sold
+        <Card className="border border-sky-500/20 bg-gradient-to-b from-card/90 via-card/75 to-card/90 backdrop-blur-xl hover:border-sky-500/50 hover:-translate-y-1 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(14,165,233,0.15)] rounded-2xl group overflow-hidden relative">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-sky-500/10 blur-xl group-hover:bg-sky-500/20 transition-colors" />
+          <CardContent className="p-5 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground truncate">Available Plots</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-display mt-1 text-sky-600 dark:text-sky-400 truncate">{stats?.availablePlots ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-2 truncate">
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{stats?.bookedPlots ?? 0}</span> sold / booked
                 </p>
               </div>
-              <div className="rounded-lg bg-terracotta/10 p-2.5 text-terracotta group-hover:bg-terracotta group-hover:text-white transition-colors duration-300">
-                <MapPin className="h-5 w-5" />
+              <div className="shrink-0 rounded-2xl bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-600 text-white p-3.5 shadow-[0_6px_20px_rgba(14,165,233,0.35)] group-hover:scale-110 transition-transform duration-300">
+                <MapPin className="h-6 w-6" />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border border-border/50 hover:border-terracotta/40 hover:-translate-y-0.5 transition-all duration-300 shadow-xs hover:shadow-md group">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">New Leads</p>
-                <p className="text-2xl font-semibold text-display mt-1 text-ink dark:text-foreground">{stats?.newLeads ?? 0}</p>
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  <span className="font-medium text-ink/75 dark:text-foreground/75">{stats?.qualifiedLeads ?? 0}</span> qualified leads
+        <Card className="border border-violet-500/20 bg-gradient-to-b from-card/90 via-card/75 to-card/90 backdrop-blur-xl hover:border-violet-500/50 hover:-translate-y-1 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(139,92,246,0.15)] rounded-2xl group overflow-hidden relative">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-violet-500/10 blur-xl group-hover:bg-violet-500/20 transition-colors" />
+          <CardContent className="p-5 relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground truncate">New Leads</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-display mt-1 text-violet-600 dark:text-violet-400 truncate">{stats?.newLeads ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-2 truncate">
+                  <span className="font-semibold text-ink/80 dark:text-foreground/80">{stats?.qualifiedLeads ?? 0}</span> qualified leads
                 </p>
               </div>
-              <div className="rounded-lg bg-terracotta/10 p-2.5 text-terracotta group-hover:bg-terracotta group-hover:text-white transition-colors duration-300">
-                <Users className="h-5 w-5" />
+              <div className="shrink-0 rounded-2xl bg-gradient-to-br from-violet-500 via-purple-600 to-indigo-600 text-white p-3.5 shadow-[0_6px_20px_rgba(139,92,246,0.35)] group-hover:scale-110 transition-transform duration-300">
+                <Users className="h-6 w-6" />
               </div>
             </div>
           </CardContent>
@@ -260,10 +299,10 @@ function Dashboard() {
 
       {/* Performance Overview */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 border border-border/60 bg-card/85 backdrop-blur-md rounded-2xl shadow-xs hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
             <div>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-display text-xl text-ink dark:text-foreground">
                 <Activity className="h-5 w-5 text-terracotta" />
                 Sales Performance
               </CardTitle>
@@ -281,102 +320,102 @@ function Dashboard() {
                   setInputTarget(String(monthlyTarget));
                   setTargetDialogOpen(true);
                 }}
-                className="h-8 text-xs border-terracotta/30 text-terracotta hover:bg-terracotta/10 cursor-pointer"
+                className="h-8 text-xs border-terracotta/30 text-terracotta hover:bg-terracotta/10 cursor-pointer rounded-lg shrink-0 ml-2"
               >
                 <Edit3 className="h-3.5 w-3.5 mr-1" />
                 Set Target
               </Button>
             ) : (
-              <Badge variant="outline" className="text-xs font-normal">
+              <Badge variant="outline" className="text-xs font-normal shrink-0 ml-2">
                 Target: {money(monthlyTarget)}
               </Badge>
             )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground font-medium">
+              <div className="flex items-center justify-between text-sm gap-2">
+                <span className="text-muted-foreground font-medium truncate">
                   Monthly Target Achievement ({formatMoney(stats?.thisMonthRevenue ?? 0)} of {formatMoney(monthlyTarget)})
                 </span>
-                <span className="font-semibold text-terracotta">
+                <span className="font-semibold text-terracotta shrink-0">
                   {achievementPercent}%
                 </span>
               </div>
               <Progress
                 value={achievementPercent}
-                className="h-2.5"
+                className="h-2.5 bg-muted rounded-full overflow-hidden"
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
-              <div className="text-center p-4 rounded-lg bg-muted/50">
-                <p className="text-2xl font-semibold text-display text-terracotta">
+              <div className="text-center p-4 rounded-xl bg-terracotta/[0.04] border border-terracotta/15 backdrop-blur-xs min-w-0">
+                <p className="text-xl sm:text-2xl font-bold text-display text-terracotta truncate">
                   {formatMoney(stats?.thisMonthRevenue ?? 0)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">This Month</p>
+                <p className="text-xs font-medium text-muted-foreground mt-1">This Month</p>
               </div>
-              <div className="text-center p-4 rounded-lg bg-muted/50">
-                <p className="text-2xl font-semibold text-display">
+              <div className="text-center p-4 rounded-xl bg-muted/40 border border-border/40 backdrop-blur-xs min-w-0">
+                <p className="text-xl sm:text-2xl font-bold text-display text-ink dark:text-foreground truncate">
                   {formatMoney(stats?.lastMonthRevenue ?? 0)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">Last Month</p>
+                <p className="text-xs font-medium text-muted-foreground mt-1">Last Month</p>
               </div>
-              <div className="text-center p-4 rounded-lg bg-muted/50">
-                <p className="text-2xl font-semibold text-display">
+              <div className="text-center p-4 rounded-xl bg-muted/40 border border-border/40 backdrop-blur-xs min-w-0">
+                <p className="text-xl sm:text-2xl font-bold text-display text-ink dark:text-foreground truncate">
                   {stats?.approvedBookings ?? 0}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">Total Bookings</p>
+                <p className="text-xs font-medium text-muted-foreground mt-1">Total Bookings</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border border-border/60 bg-card/85 backdrop-blur-md rounded-2xl shadow-xs">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-display text-xl text-ink dark:text-foreground">
               <Target className="h-5 w-5 text-terracotta" />
               Quick Stats
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
               <span className="text-sm text-muted-foreground">Live Projects</span>
-              <Badge variant="secondary">{stats?.liveProjects ?? 0}</Badge>
+              <Badge variant="secondary" className="font-semibold bg-terracotta/10 text-terracotta border-terracotta/20">{stats?.liveProjects ?? 0}</Badge>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
               <span className="text-sm text-muted-foreground">Total Plots</span>
-              <Badge variant="secondary">{stats?.totalPlots ?? 0}</Badge>
+              <Badge variant="secondary" className="font-semibold">{stats?.totalPlots ?? 0}</Badge>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
               <span className="text-sm text-muted-foreground">Team Size</span>
-              <Badge variant="secondary">{stats?.totalEmployees ?? 0}</Badge>
+              <Badge variant="secondary" className="font-semibold">{stats?.totalEmployees ?? 0}</Badge>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
               <span className="text-sm text-muted-foreground">Pending Messages</span>
-              <Badge variant={stats?.unreadMessages ? "default" : "secondary"}>
+              <Badge variant={stats?.unreadMessages ? "default" : "secondary"} className="font-semibold">
                 {stats?.unreadMessages ?? 0}
               </Badge>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
               <span className="text-sm text-muted-foreground">Incentives Paid</span>
-              <Badge variant="secondary">{formatMoney(stats?.totalIncentivesPaid ?? 0)}</Badge>
+              <Badge variant="secondary" className="font-semibold">{formatMoney(stats?.totalIncentivesPaid ?? 0)}</Badge>
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Quick Actions */}
-      <Card className="border border-border/50 shadow-xs">
+      <Card className="border border-border/60 bg-card/85 backdrop-blur-md rounded-2xl shadow-xs">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-ink dark:text-foreground">
+          <CardTitle className="flex items-center gap-2 text-display text-xl text-ink dark:text-foreground">
             <Zap className="h-5 w-5 text-terracotta" />
             Quick Actions
           </CardTitle>
-          <CardDescription>Frequently used tasks</CardDescription>
+          <CardDescription>Frequently used platform tools</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Link to="/projects">
-              <Button variant="outline" className="w-full justify-start h-auto py-3.5 hover:border-terracotta/40 hover:bg-terracotta/[0.02] transition-colors cursor-pointer group">
+              <Button variant="outline" className="w-full justify-start h-auto py-3.5 border-border/60 hover:border-terracotta/50 hover:bg-terracotta/[0.04] transition-all duration-300 cursor-pointer group rounded-xl">
                 <FolderKanban className="h-5 w-5 mr-3 text-terracotta transition-transform group-hover:scale-110" />
                 <div className="text-left">
                   <p className="font-semibold text-sm">Browse Projects</p>
@@ -386,7 +425,7 @@ function Dashboard() {
               </Button>
             </Link>
             <Link to="/bookings">
-              <Button variant="outline" className="w-full justify-start h-auto py-3.5 hover:border-terracotta/40 hover:bg-terracotta/[0.02] transition-colors cursor-pointer group">
+              <Button variant="outline" className="w-full justify-start h-auto py-3.5 border-border/60 hover:border-terracotta/50 hover:bg-terracotta/[0.04] transition-all duration-300 cursor-pointer group rounded-xl">
                 <ClipboardCheck className="h-5 w-5 mr-3 text-terracotta transition-transform group-hover:scale-110" />
                 <div className="text-left">
                   <p className="font-semibold text-sm">Manage Bookings</p>
@@ -396,7 +435,7 @@ function Dashboard() {
               </Button>
             </Link>
             <Link to="/leads">
-              <Button variant="outline" className="w-full justify-start h-auto py-3.5 hover:border-terracotta/40 hover:bg-terracotta/[0.02] transition-colors cursor-pointer group">
+              <Button variant="outline" className="w-full justify-start h-auto py-3.5 border-border/60 hover:border-terracotta/50 hover:bg-terracotta/[0.04] transition-all duration-300 cursor-pointer group rounded-xl">
                 <Users className="h-5 w-5 mr-3 text-terracotta transition-transform group-hover:scale-110" />
                 <div className="text-left">
                   <p className="font-semibold text-sm">View Leads</p>
@@ -406,7 +445,7 @@ function Dashboard() {
               </Button>
             </Link>
             <Link to="/messages">
-              <Button variant="outline" className="w-full justify-start h-auto py-3.5 hover:border-terracotta/40 hover:bg-terracotta/[0.02] transition-colors cursor-pointer group">
+              <Button variant="outline" className="w-full justify-start h-auto py-3.5 border-border/60 hover:border-terracotta/50 hover:bg-terracotta/[0.04] transition-all duration-300 cursor-pointer group rounded-xl">
                 <MessageSquare className="h-5 w-5 mr-3 text-terracotta transition-transform group-hover:scale-110" />
                 <div className="text-left">
                   <p className="font-semibold text-sm">Messages</p>
@@ -421,7 +460,7 @@ function Dashboard() {
 
       {/* Recent Activity */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border border-border/50 shadow-xs hover:border-terracotta/20 transition-colors duration-300">
+        <Card className="border border-border/60 bg-card/85 backdrop-blur-md rounded-2xl shadow-xs hover:border-terracotta/30 transition-colors duration-300">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-ink dark:text-foreground">
               <Calendar className="h-5 w-5 text-terracotta" />
@@ -443,6 +482,8 @@ function Dashboard() {
                       <p className="font-semibold text-ink dark:text-foreground truncate">{booking.customer_name || "Customer"}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {formatMoney(booking.total_price || 0)}
+                        {booking.plots?.plot_number ? ` · Plot ${booking.plots.plot_number}` : ""}
+                        {booking.plots?.projects?.name ? ` (${booking.plots.projects.name})` : ""}
                       </p>
                     </div>
                     <Badge

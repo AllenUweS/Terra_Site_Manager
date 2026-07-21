@@ -34,9 +34,11 @@ import {
   type PlotRow,
   type PlotStatus,
   type Point,
+  type PurchaserRecord,
 } from "./types";
 import { PlotFormDialog, type PlotFormValues } from "./PlotFormDialog";
 import { LeadsPanel } from "./LeadsPanel";
+import { PurchaserDetailsCard } from "./PurchaserDetailsCard";
 
 interface SiteMapperProps {
   projectId: string;
@@ -89,6 +91,30 @@ export function SiteMapper({
       return (data ?? []) as unknown as PlotRow[];
     },
   });
+
+  const { data: projectBookings, refetch: refetchProjectBookings } = useQuery({
+    queryKey: ["project-bookings", projectId],
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("bookings")
+        .select("plot_id, customer_name, customer_phone, total_price, booking_date")
+        .order("created_at", { ascending: false });
+
+      const map: Record<string, { customer_name: string; customer_phone: string }> = {};
+      if (data) {
+        for (const b of data) {
+          if (b.plot_id && !map[b.plot_id]) {
+            map[b.plot_id] = {
+              customer_name: b.customer_name,
+              customer_phone: b.customer_phone,
+            };
+          }
+        }
+      }
+      return map;
+    },
+  });
+
 
   // ---------------------------------------------------------------------
   // Fullscreen + canvas geometry
@@ -181,6 +207,63 @@ export function SiteMapper({
   const [pendingPolygon, setPendingPolygon] = useState<Point[] | null>(null);
 
   const selectedPlot = plots?.find((p) => p.id === selectedId) ?? null;
+
+  const { data: selectedPlotPurchaser, refetch: refetchSelectedPurchaser } = useQuery({
+    queryKey: ["plot-purchaser", selectedId],
+    enabled: !!selectedId,
+    queryFn: async () => {
+      if (!selectedId) return null;
+      const { data: bData } = await (supabase as any)
+        .from("bookings")
+        .select("*, sales_executive:sales_executive_id(full_name, phone, email)")
+        .eq("plot_id", selectedId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (bData) {
+        return {
+          id: bData.id,
+          plot_id: bData.plot_id,
+          customer_name: bData.customer_name,
+          customer_phone: bData.customer_phone,
+          customer_email: bData.customer_email,
+          customer_address: bData.customer_address,
+          total_price: bData.total_price,
+          booking_amount: bData.booking_amount,
+          advance_paid: bData.advance_paid,
+          booking_date: bData.booking_date,
+          payment_method: bData.payment_method,
+          status: bData.status,
+          remarks: bData.remarks,
+          sales_executive: bData.sales_executive,
+        } as PurchaserRecord;
+      }
+
+      const { data: lData } = await (supabase as any)
+        .from("plot_leads")
+        .select("*")
+        .eq("plot_id", selectedId)
+        .eq("status", "converted")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lData) {
+        return {
+          plot_id: lData.plot_id,
+          customer_name: lData.name,
+          customer_phone: lData.phone,
+          customer_email: lData.email,
+          total_price: lData.budget,
+          remarks: lData.notes,
+          lead: { source: lData.source, notes: lData.notes },
+        } as PurchaserRecord;
+      }
+
+      return null;
+    },
+  });
   const attachTargetPlot = plots?.find((p) => p.id === attachTargetId) ?? null;
   const unmapped = useMemo(
     () => (plots ?? []).filter((p) => !p.polygon_coordinates || p.polygon_coordinates.length < 3),
@@ -647,7 +730,7 @@ export function SiteMapper({
                 </Button>
                 <Button
                   size="sm"
-                  onClick={finishShape}
+                  onClick={() => finishShape()}
                   disabled={draftPoints.length < MIN_POINTS}
                   className="bg-terracotta text-accent-foreground hover:bg-terracotta/90"
                 >
@@ -801,7 +884,10 @@ export function SiteMapper({
                             style={{ fill: palette.fill, stroke: palette.stroke }}
                             strokeWidth={isSel ? 3 : 1.5}
                             vectorEffect="non-scaling-stroke"
-                          />
+                          >
+                            <title>{`Plot ${plot.plot_number} (${STATUS_LABEL[plot.status]})${projectBookings?.[plot.id] ? ` · Sold to ${projectBookings[plot.id].customer_name}` : ""}`}</title>
+                          </polygon>
+
                           <text
                             x={centroid.x}
                             y={centroid.y}
@@ -956,8 +1042,13 @@ export function SiteMapper({
             {selectedPlot ? (
               <PlotInfoCard
                 plot={selectedPlot}
+                purchaser={selectedPlotPurchaser ?? null}
                 isAdmin={isAdmin}
                 userId={userId}
+                onRecordSuccess={() => {
+                  refetchSelectedPurchaser();
+                  refetchProjectBookings();
+                }}
                 onClose={() => setSelectedId(null)}
                 onEdit={() => openEdit(selectedPlot)}
                 onRedraw={() => startDrawFor(selectedPlot.id)}
@@ -1036,8 +1127,14 @@ export function SiteMapper({
                                 />
                                 <span className="text-sm font-medium truncate group-hover:text-terracotta transition-colors">{p.plot_number}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-[10px] text-muted-foreground pl-4">
-                                <span className="capitalize">{p.status}</span>
+                              <div className="flex items-center gap-2 text-[10px] text-muted-foreground pl-4 flex-wrap">
+                                {(p.status === "sold" || p.status === "booked") && projectBookings?.[p.id]?.customer_name ? (
+                                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold truncate">
+                                    Sold to: {projectBookings[p.id].customer_name}
+                                  </span>
+                                ) : (
+                                  <span className="capitalize">{p.status}</span>
+                                )}
                                 {p.facing && (
                                   <>
                                     <span>·</span>
@@ -1104,8 +1201,10 @@ function LegendDot({ status, label }: { status: PlotStatus; label: string }) {
 
 function PlotInfoCard({
   plot,
+  purchaser,
   isAdmin,
   userId,
+  onRecordSuccess,
   onClose,
   onEdit,
   onRedraw,
@@ -1114,8 +1213,10 @@ function PlotInfoCard({
   onBookForLead,
 }: {
   plot: PlotRow;
+  purchaser: PurchaserRecord | null;
   isAdmin: boolean;
   userId: string;
+  onRecordSuccess: () => void;
   onClose: () => void;
   onEdit: () => void;
   onRedraw: () => void;
@@ -1123,9 +1224,11 @@ function PlotInfoCard({
   onBook: () => void;
   onBookForLead: (leadId: string) => void;
 }) {
+  const isSoldOrBooked = plot.status === "sold" || plot.status === "booked";
+
   return (
-    <div className="border rounded-lg bg-background p-4">
-      <div className="flex items-start justify-between mb-2">
+    <div className="border rounded-lg bg-background p-4 space-y-4">
+      <div className="flex items-start justify-between">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             Plot
@@ -1137,56 +1240,69 @@ function PlotInfoCard({
         </button>
       </div>
 
-      <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize mb-3">
-        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_PALETTE[plot.status].dot}`} />
-        {STATUS_LABEL[plot.status]}
-      </span>
-
-      <dl className="space-y-2 text-xs">
-        {plot.facing && (
-          <Row
-            label="Facing"
-            value={
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="h-3 w-3 text-terracotta" />
-                {FACING_LABEL[plot.facing]}
-              </span>
-            }
-          />
-        )}
-        {plot.length_ft && plot.width_ft && (
-          <Row
-            label="Dimensions"
-            value={
-              <span className="inline-flex items-center gap-1">
-                <Ruler className="h-3 w-3 text-muted-foreground" />
-                {plot.length_ft} × {plot.width_ft} ft
-              </span>
-            }
-          />
-        )}
-        {!plot.length_ft && plot.dimensions && <Row label="Dimensions" value={plot.dimensions} />}
-        <Row label="Area" value={`${Number(plot.area_sqft).toLocaleString("en-IN")} sq.ft`} />
-        <Row
-          label="Price"
-          value={
-            <span className="inline-flex items-center gap-0.5 font-semibold">
-              <IndianRupee className="h-3 w-3" />
-              {Number(plot.price).toLocaleString("en-IN")}
-            </span>
-          }
+      {/* If Plot is Sold or Booked, show Purchaser Details Card */}
+      {isSoldOrBooked && (
+        <PurchaserDetailsCard
+          plot={plot}
+          purchaser={purchaser}
+          isAdmin={isAdmin}
+          userId={userId}
+          onRecordSuccess={onRecordSuccess}
         />
-        {plot.road_width != null && <Row label="Road width" value={`${plot.road_width} ft`} />}
-        {plot.corner_plot && <Row label="Corner plot" value="Yes" />}
-        {plot.remarks && (
-          <div className="border-t pt-2">
-            <dt className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Remarks
-            </dt>
-            <dd>{plot.remarks}</dd>
-          </div>
-        )}
-      </dl>
+      )}
+
+      <div>
+        <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize mb-3">
+          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_PALETTE[plot.status].dot}`} />
+          {STATUS_LABEL[plot.status]}
+        </span>
+
+        <dl className="space-y-2 text-xs">
+          {plot.facing && (
+            <Row
+              label="Facing"
+              value={
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-3 w-3 text-terracotta" />
+                  {FACING_LABEL[plot.facing]}
+                </span>
+              }
+            />
+          )}
+          {plot.length_ft && plot.width_ft && (
+            <Row
+              label="Dimensions"
+              value={
+                <span className="inline-flex items-center gap-1">
+                  <Ruler className="h-3 w-3 text-muted-foreground" />
+                  {plot.length_ft} × {plot.width_ft} ft
+                </span>
+              }
+            />
+          )}
+          {!plot.length_ft && plot.dimensions && <Row label="Dimensions" value={plot.dimensions} />}
+          <Row label="Area" value={`${Number(plot.area_sqft).toLocaleString("en-IN")} sq.ft`} />
+          <Row
+            label="Price"
+            value={
+              <span className="inline-flex items-center gap-0.5 font-semibold">
+                <IndianRupee className="h-3 w-3" />
+                {Number(plot.price).toLocaleString("en-IN")}
+              </span>
+            }
+          />
+          {plot.road_width != null && <Row label="Road width" value={`${plot.road_width} ft`} />}
+          {plot.corner_plot && <Row label="Corner plot" value="Yes" />}
+          {plot.remarks && (
+            <div className="border-t pt-2">
+              <dt className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                Remarks
+              </dt>
+              <dd>{plot.remarks}</dd>
+            </div>
+          )}
+        </dl>
+      </div>
 
       {plot.status === "available" && !isAdmin && (
         <Button
@@ -1226,7 +1342,7 @@ function PlotInfoCard({
         </div>
       )}
 
-      {plot.status !== "sold" && plot.status !== "booked" && (
+      {!isSoldOrBooked && (
         <div className="mt-4">
           <LeadsPanel
             plot={plot}
@@ -1239,6 +1355,7 @@ function PlotInfoCard({
     </div>
   );
 }
+
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
