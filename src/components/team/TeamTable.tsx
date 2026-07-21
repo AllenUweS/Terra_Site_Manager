@@ -2,12 +2,13 @@ import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { EmployeeFormDialog } from "./EmployeeFormDialog";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus, Loader2, Search, Mail, Briefcase, Building, Phone, Pencil, Users } from "lucide-react";
+import { Plus, Loader2, Search, Mail, Briefcase, Building, Phone, Pencil, Users, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 const HIERARCHY: Record<string, number> = {
@@ -36,9 +37,30 @@ const getRoleGradient = (role: string) => {
 export function TeamTable() {
   const [editingEmployee, setEditingEmployee] = useState<any | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [passwordTargetEmployee, setPasswordTargetEmployee] = useState<any | null>(null);
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("ALL");
   const qc = useQueryClient();
+
+  const { data: currentUser } = useQuery({
+    queryKey: ["current_user"],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getUser();
+      return data.user;
+    },
+  });
+
+  const { data: userRole } = useQuery({
+    queryKey: ["role", currentUser?.id],
+    enabled: !!currentUser?.id,
+    queryFn: async () => {
+      const { data } = await supabase.rpc("get_primary_role", { _user_id: currentUser!.id });
+      return (data as string) ?? "employee";
+    },
+  });
+
+  const isAdmin = userRole === "admin" || userRole === "super_admin";
 
   const { data: profiles, isLoading: isLoadingProfiles } = useQuery({
     queryKey: ["team_profiles"],
@@ -227,17 +249,34 @@ export function TeamTable() {
                   {members.map(member => (
                     <div key={member.id} className="group relative flex gap-4 p-5 rounded-xl border border-border/50 bg-background shadow-sm hover:shadow-md transition-all hover:border-primary/20">
                       
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => {
-                          setEditingEmployee(member);
-                          setIsDialogOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4 text-muted-foreground" />
-                      </Button>
+                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-terracotta hover:bg-terracotta/10 rounded-lg cursor-pointer transition-colors"
+                            title="Change Employee Password"
+                            onClick={() => {
+                              setPasswordTargetEmployee(member);
+                              setIsPasswordDialogOpen(true);
+                            }}
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 rounded-lg cursor-pointer"
+                          title="Edit Employee"
+                          onClick={() => {
+                            setEditingEmployee(member);
+                            setIsDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      </div>
 
                       <Avatar className="h-12 w-12 border-2 border-primary/10 font-bold">
                         <AvatarImage src={member.avatar_url || ""} />
@@ -317,6 +356,12 @@ export function TeamTable() {
         onOpenChange={setIsDialogOpen}
         employee={editingEmployee}
         teamMembers={teamMembers}
+      />
+
+      <ChangePasswordDialog
+        open={isPasswordDialogOpen}
+        onOpenChange={setIsPasswordDialogOpen}
+        employee={passwordTargetEmployee}
       />
     </div>
   );

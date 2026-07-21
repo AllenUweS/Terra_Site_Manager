@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase, createSecondarySupabaseClient } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { Loader2, KeyRound } from "lucide-react";
 
 const formSchema = z.object({
   full_name: z.string().min(1, "Name is required"),
@@ -39,6 +40,7 @@ export function EmployeeFormDialog({
   teamMembers?: any[];
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const qc = useQueryClient();
   const isEditing = !!employee;
 
@@ -180,13 +182,38 @@ export function EmployeeFormDialog({
             </div>
           </div>
 
-          {!isEditing && (
+          {isEditing ? (
+            <div className="p-3.5 rounded-xl bg-terracotta/[0.05] border border-terracotta/20 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <KeyRound className="h-3.5 w-3.5 text-terracotta" />
+                  Employee Authentication
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Admin power to update password or send reset link.</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPasswordDialogOpen(true)}
+                className="h-8 text-xs border-terracotta/30 text-terracotta hover:bg-terracotta/10 shrink-0 cursor-pointer rounded-lg font-medium"
+              >
+                Change Password
+              </Button>
+            </div>
+          ) : (
             <div className="space-y-2">
               <Label>Password</Label>
               <Input {...register("password")} type="password" placeholder="Min. 6 characters" autoComplete="new-password" />
               {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
           )}
+
+          <ChangePasswordDialog
+            open={passwordDialogOpen}
+            onOpenChange={setPasswordDialogOpen}
+            employee={employee}
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
