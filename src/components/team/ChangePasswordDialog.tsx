@@ -94,33 +94,59 @@ export function ChangePasswordDialog({
     try {
       setLoading(true);
 
-      // Attempt 1: Call admin RPC function if available in database
-      const { error: rpcError } = await supabase.rpc("admin_update_user_password" as any, {
-        _user_id: employee.id,
-        _new_password: newPassword,
-      });
-
-      if (rpcError) {
-        // Attempt 2: Call change_user_password alternate RPC name
-        const { error: rpcError2 } = await supabase.rpc("change_user_password" as any, {
-          target_user_id: employee.id,
-          new_password: newPassword,
+      // Check if logged-in user is editing their own password
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user?.id === employee.id) {
+        const { error: ownUpdateError } = await supabase.auth.updateUser({
+          password: newPassword,
         });
-
-        if (rpcError2) {
-          console.warn("RPC password update not available, falling back to password reset link trigger.");
-          // Fallback: Send password reset email link automatically
-          await supabase.auth.resetPasswordForEmail(employee.email || "", {
-            redirectTo: `${window.location.origin}/auth`,
-          });
-          toast.success(`Password update request queued & reset link dispatched to ${employee.email || "employee"}`);
+        if (!ownUpdateError) {
+          toast.success("Your password has been updated successfully!");
           onOpenChange(false);
           resetForm();
           return;
         }
       }
 
-      toast.success(`Password updated successfully for ${employee.full_name || employee.email || "user"}`);
+      // Attempt 1: Call admin_update_user_password RPC
+      const { data: rpcResult, error: rpcError } = await supabase.rpc("admin_update_user_password" as any, {
+        _user_id: employee.id,
+        _new_password: newPassword,
+      });
+
+      if (!rpcError) {
+        toast.success(`Password updated successfully for ${employee.full_name || employee.email || "user"}`);
+        onOpenChange(false);
+        resetForm();
+        return;
+      }
+
+      // Attempt 2: Call change_user_password alternate RPC
+      const { error: rpcError2 } = await supabase.rpc("change_user_password" as any, {
+        target_user_id: employee.id,
+        new_password: newPassword,
+      });
+
+      if (!rpcError2) {
+        toast.success(`Password updated successfully for ${employee.full_name || employee.email || "user"}`);
+        onOpenChange(false);
+        resetForm();
+        return;
+      }
+
+      console.warn("RPC function missing in Supabase:", rpcError);
+
+      // Fallback: Dispatch reset email link and inform admin to run migration
+      if (employee.email) {
+        await supabase.auth.resetPasswordForEmail(employee.email, {
+          redirectTo: `${window.location.origin}/auth`,
+        });
+      }
+
+      toast.info(
+        `Password reset email sent to ${employee.email || "employee"}. To enable direct instant password overrides, execute the SQL migration in Supabase SQL Editor.`,
+        { duration: 6000 }
+      );
       onOpenChange(false);
       resetForm();
     } catch (err: any) {
