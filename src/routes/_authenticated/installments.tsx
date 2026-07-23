@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CalendarDays, CheckCircle2, Plus, Search, WalletCards } from "lucide-react";
+import { AlertTriangle, Calendar, CalendarDays, CheckCircle2, Clock, Edit2, Lock, Plus, Search, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -161,6 +161,56 @@ function InstallmentsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "overdue" | "on_track" | "fully_paid" | "schedule_needed">("all");
 
+  // Reschedule due date state
+  const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
+  const [newDueDate, setNewDueDate] = useState<string>("");
+  const [rescheduleNote, setRescheduleNote] = useState<string>("");
+
+  const getPresetDate = (type: "15d" | "1m" | "2m" | "today") => {
+    const base = new Date();
+    if (type === "15d") base.setDate(base.getDate() + 15);
+    else if (type === "1m") base.setMonth(base.getMonth() + 1);
+    else if (type === "2m") base.setMonth(base.getMonth() + 2);
+    return base.toISOString().slice(0, 10);
+  };
+
+  const openReschedule = (booking: any) => {
+    setRescheduleBooking(booking);
+    setNewDueDate(booking.first_installment_due_date || getPresetDate("1m"));
+    setRescheduleNote("");
+  };
+
+  const rescheduleMutation = useMutation({
+    mutationFn: async () => {
+      if (!rescheduleBooking || !newDueDate) throw new Error("Please select a valid date");
+
+      const existingRemarks = rescheduleBooking.remarks ?? "";
+      const noteText = rescheduleNote.trim()
+        ? `[Rescheduled on ${new Date().toLocaleDateString("en-IN")}] New Due Date: ${newDueDate}. Reason: ${rescheduleNote.trim()}`
+        : `[Rescheduled on ${new Date().toLocaleDateString("en-IN")}] New Due Date: ${newDueDate}`;
+
+      const newRemarks = existingRemarks ? `${existingRemarks}\n\n${noteText}` : noteText;
+
+      const { error } = await (supabase as any)
+        .from("bookings")
+        .update({
+          first_installment_due_date: newDueDate,
+          remarks: newRemarks,
+        })
+        .eq("id", rescheduleBooking.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Installment due date updated successfully!");
+      setRescheduleBooking(null);
+      setNewDueDate("");
+      setRescheduleNote("");
+      qc.invalidateQueries();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to reschedule due date"),
+  });
+
   const { data: role } = useQuery({
     queryKey: ["role", user.id],
     queryFn: async () => ((await supabase.rpc("get_primary_role", { _user_id: user.id })).data as string) ?? "employee"
@@ -241,6 +291,18 @@ function InstallmentsPage() {
           .update({ status: "sold" })
           .eq("id", activeBooking.plot_id);
       }
+
+      // 4. Send notification to lead owner
+      if (activeBooking.sales_executive_id) {
+        const plotInfo = activeBooking.plots?.plot_number ? ` (Plot ${activeBooking.plots.plot_number})` : "";
+        await (supabase as any).from("user_notifications").insert({
+          user_id: activeBooking.sales_executive_id,
+          title: "💳 Payment Recorded",
+          message: `${money(amountNum)} installment payment recorded for ${activeBooking.customer_name}${plotInfo}.`,
+          type: "payment_received",
+          link: "/installments",
+        });
+      }
     },
     onSuccess: () => {
       toast.success("Payment recorded successfully. Progress updated.");
@@ -297,6 +359,15 @@ function InstallmentsPage() {
           <p className="text-xl text-display">{bookings.length}</p>
         </div>
       </div>
+
+      {!isAdmin && (
+        <div className="flex items-center gap-2.5 p-3.5 px-4 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] text-amber-800 dark:text-amber-300 text-xs font-medium">
+          <Lock className="h-4 w-4 text-amber-500 shrink-0" />
+          <span>
+            <strong>Employee View-Only Mode:</strong> You can view installment progress, payment health, and due dates for your leads. Recording payments and changing due dates are managed by Admins.
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Collected" value={money(totalCollected)} tone="text-emerald-700" />
@@ -407,42 +478,87 @@ function InstallmentsPage() {
                       <div className="h-2 overflow-hidden rounded-full bg-muted">
                         <div className="h-full rounded-full bg-terracotta transition-all" style={{ width: `${progress}%` }} />
                       </div>
-                      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <CalendarDays className="h-3.5 w-3.5" /> Next:{" "}
-                        {completed
-                          ? "Complete"
-                          : health.nextDue
-                          ? health.nextDue.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-                          : health.planExhausted
-                          ? "Plan finished (Overdue)"
-                          : "Due date not set"}
+                      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <CalendarDays className="h-3.5 w-3.5 text-terracotta" /> Next:{" "}
+                          <span className="font-medium text-foreground">
+                            {completed
+                              ? "Complete"
+                              : health.nextDue
+                              ? health.nextDue.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                              : health.planExhausted
+                              ? "Plan finished (Overdue)"
+                              : "Due date not set"}
+                          </span>
+                        </div>
+                        {isAdmin && !completed && (
+                          <button
+                            type="button"
+                            onClick={() => openReschedule(booking)}
+                            className="text-[11px] font-semibold text-terracotta hover:underline inline-flex items-center gap-1 shrink-0 ml-2"
+                            title="Edit or set installment due date"
+                          >
+                            <Calendar className="h-3 w-3" /> {booking.first_installment_due_date ? "Edit Date" : "Set Date"}
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    <div className={`rounded-xl border p-3 ${health.overdue > 0 ? "border-destructive/30 bg-destructive/5" : "border-emerald-500/20 bg-emerald-500/5"}`}>
+                    <div className={`rounded-xl border p-3 flex flex-col justify-between ${health.overdue > 0 ? "border-destructive/30 bg-destructive/5" : "border-emerald-500/20 bg-emerald-500/5"}`}>
                       {health.overdue > 0 ? (
                         <>
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
-                            <AlertTriangle className="h-3.5 w-3.5" /> {health.statusLabel}
+                          <div>
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                              <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {health.statusLabel}
+                            </div>
+                            <p className="mt-1 text-xl font-semibold text-destructive">{money(health.overdue)}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{health.subtext}</p>
                           </div>
-                          <p className="mt-1 text-xl font-semibold text-destructive">{money(health.overdue)}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{health.subtext}</p>
+
+                          {isAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openReschedule(booking)}
+                              className="mt-3 text-xs border-destructive/30 text-destructive hover:bg-destructive/10 gap-1.5 h-7 w-full font-medium"
+                            >
+                              <Calendar className="h-3.5 w-3.5" /> Reschedule Due Date
+                            </Button>
+                          )}
                         </>
                       ) : (
                         <>
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Payment status
+                          <div>
+                            <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Payment status
+                            </div>
+                            <p className="mt-1 text-base font-semibold text-emerald-700">{completed ? "Fully paid" : "On track"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{health.subtext}</p>
                           </div>
-                          <p className="mt-1 text-base font-semibold text-emerald-700">{completed ? "Fully paid" : "On track"}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{health.subtext}</p>
+
+                          {isAdmin && !completed && !health.scheduled && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openReschedule(booking)}
+                              className="mt-3 text-xs border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 gap-1.5 h-7 w-full font-medium"
+                            >
+                              <Calendar className="h-3.5 w-3.5" /> Set Due Date
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
 
                     {isAdmin && !completed ? (
-                      <Button onClick={() => openRecord(booking)} className="bg-terracotta text-accent-foreground hover:bg-terracotta/90">
-                        <Plus className="mr-1 h-4 w-4" /> Record payment
-                      </Button>
+                      <div className="flex flex-col gap-2">
+                        <Button onClick={() => openRecord(booking)} className="bg-terracotta text-accent-foreground hover:bg-terracotta/90 w-full">
+                          <Plus className="mr-1 h-4 w-4" /> Record payment
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => openReschedule(booking)} className="w-full text-xs text-muted-foreground hover:text-foreground gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-terracotta" /> Reschedule
+                        </Button>
+                      </div>
                     ) : (
                       <div className="text-right text-xs text-muted-foreground">{completed ? "All payments received" : "Admin access required"}</div>
                     )}
@@ -538,6 +654,121 @@ function InstallmentsPage() {
               {recordPayment.isPending ? "Recording…" : "Confirm payment"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Installment Due Date Dialog */}
+      <Dialog open={!!rescheduleBooking} onOpenChange={(open) => !open && setRescheduleBooking(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-terracotta" /> Reschedule Installment Due Date
+            </DialogTitle>
+            <DialogDescription>
+              {rescheduleBooking?.customer_name} · Plot {rescheduleBooking?.plots?.plot_number} ({rescheduleBooking?.plots?.projects?.name})
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Health Info Card */}
+            {rescheduleBooking && (
+              <div className="rounded-xl border p-3 bg-muted/20 space-y-1 text-xs">
+                <p className="text-muted-foreground uppercase tracking-wider font-semibold text-[10px]">Current Schedule</p>
+                <p className="font-semibold text-sm">
+                  {rescheduleBooking.first_installment_due_date
+                    ? `First Due: ${new Date(`${rescheduleBooking.first_installment_due_date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                    : "No due date currently set"}
+                </p>
+                <p className="text-muted-foreground">
+                  {rescheduleBooking.installment_count ?? 1} installments of {money(Number(rescheduleBooking.installment_amount ?? 0))}
+                </p>
+              </div>
+            )}
+
+            {/* Quick Presets */}
+            <div>
+              <Label className="text-xs text-muted-foreground mb-2 block">Quick Date Presets</Label>
+              <div className="grid grid-cols-4 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="text-xs py-1 h-8"
+                  onClick={() => setNewDueDate(getPresetDate("today"))}
+                >
+                  Today
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="text-xs py-1 h-8"
+                  onClick={() => setNewDueDate(getPresetDate("15d"))}
+                >
+                  +15 Days
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="text-xs py-1 h-8"
+                  onClick={() => setNewDueDate(getPresetDate("1m"))}
+                >
+                  +1 Month
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="text-xs py-1 h-8"
+                  onClick={() => setNewDueDate(getPresetDate("2m"))}
+                >
+                  +2 Months
+                </Button>
+              </div>
+            </div>
+
+            {/* Custom Date Input */}
+            <div>
+              <Label className="text-xs text-muted-foreground">New Target / First Due Date</Label>
+              <Input
+                type="date"
+                className="mt-1"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+              />
+            </div>
+
+            {/* Reason / Remarks */}
+            <div>
+              <Label className="text-xs text-muted-foreground">Reason for Rescheduling (Optional)</Label>
+              <Input
+                placeholder="e.g. Extended due to customer bank loan process"
+                className="mt-1 text-xs"
+                value={rescheduleNote}
+                onChange={(e) => setRescheduleNote(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRescheduleBooking(null)}
+              disabled={rescheduleMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => rescheduleMutation.mutate()}
+              disabled={rescheduleMutation.isPending || !newDueDate}
+              className="bg-terracotta hover:bg-terracotta/90 text-white"
+            >
+              {rescheduleMutation.isPending ? "Updating Date…" : "Save New Due Date"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

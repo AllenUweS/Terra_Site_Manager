@@ -21,7 +21,7 @@ const formSchema = z.object({
   job_title: z.string().optional(),
   department: z.string().optional(),
   status: z.enum(["active", "inactive"]),
-  role: z.enum(["admin", "employee", "manager"]),
+  role: z.enum(["admin", "employee", "manager", "management"]),
   manager_id: z.string().optional(),
   joining_date: z.string().optional(),
 });
@@ -135,7 +135,7 @@ export function EmployeeFormDialog({
       if (profileError) throw profileError;
 
       // Update Role
-      const { error: roleError } = await supabase
+      const { error: roleError } = await (supabase as any)
         .from("user_roles")
         .update({ role: values.role })
         .eq("user_id", targetUserId);
@@ -249,6 +249,7 @@ export function EmployeeFormDialog({
                 <SelectContent>
                   <SelectItem value="employee">Employee</SelectItem>
                   <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="management">Management (Admin + Treasury)</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>

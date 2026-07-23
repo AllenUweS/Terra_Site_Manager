@@ -740,7 +740,7 @@ function Index() {
             </div>
             <div className="w-full h-px bg-foreground/20" />
             <div className="w-full flex items-center justify-between pt-5">
-              <span className="text-sm opacity-50">© 2026 Terra. All rights reserved.</span>
+              <span className="text-sm opacity-50">© 2026 Terra Studios. All rights reserved.</span>
               <span className="text-sm opacity-50">Marbella, Costa del Sol</span>
             </div>
           </div>

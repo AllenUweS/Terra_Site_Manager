@@ -20,9 +20,12 @@ import {
   Sparkles,
   MessageSquare,
   MapPinned,
+  FolderOpen,
+  Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
+import { NotificationBell } from "@/components/NotificationBell";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -74,12 +77,16 @@ function AuthedLayout() {
     { to: "/bookings", label: "Bookings", icon: ClipboardList },
     { to: "/installments", label: "Installments", icon: WalletCards },
     { to: "/leads", label: "Leads", icon: Contact2 },
+    { to: "/documents", label: "Documents", icon: FolderOpen },
     { to: "/team", label: "Team", icon: Users },
   ] as const;
 
   const visibleNav = [
     ...nav,
-    ...(role === "admin" || role === "super_admin" || role === "manager"
+    ...(role === "admin" || role === "super_admin" || role === "management"
+      ? [{ to: "/treasury" as const, label: "Treasury", icon: Landmark }]
+      : []),
+    ...(role === "admin" || role === "super_admin" || role === "manager" || role === "management"
       ? [
           { to: "/incentives" as const, label: "Incentives", icon: Sparkles },
           { to: "/messages" as const, label: "Messages", icon: MessageSquare },
@@ -87,7 +94,7 @@ function AuthedLayout() {
       : role === "employee"
         ? [{ to: "/my-incentives" as const, label: "Incentives", icon: Sparkles }]
         : []),
-    ...(role === "admin" || role === "super_admin"
+    ...(role === "admin" || role === "super_admin" || role === "management"
       ? [{ to: "/visit-proofs" as const, label: "Visit Proofs", icon: MapPinned }]
       : []),
   ];
@@ -99,14 +106,17 @@ function AuthedLayout() {
         {/* Subtle Ambient Glow */}
         <div className="pointer-events-none absolute -left-16 -top-16 h-40 w-40 rounded-full bg-terracotta/5 blur-3xl" />
 
-        <div className="p-6 border-b border-border/50">
-          <Link to="/dashboard" className="inline-flex items-center gap-2 text-display text-2xl font-bold text-ink dark:text-foreground group">
-            <span className="h-2 w-2 rounded-full bg-terracotta group-hover:scale-125 transition-transform" />
-            Terra
-          </Link>
-          <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-[0.2em] font-medium">
-            Developer Platform
-          </p>
+        <div className="p-6 border-b border-border/50 flex items-center justify-between">
+          <div>
+            <Link to="/dashboard" className="inline-flex items-center gap-2 text-display text-2xl font-bold text-ink dark:text-foreground group">
+              <span className="h-2 w-2 rounded-full bg-terracotta group-hover:scale-125 transition-transform" />
+              Terra
+            </Link>
+            <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-[0.2em] font-medium">
+              Developer Platform
+            </p>
+          </div>
+          <NotificationBell userId={user.id} />
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
@@ -257,9 +267,12 @@ function AuthedLayout() {
               Terra
             </Link>
           </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>
-            <LogOut className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <NotificationBell userId={user.id} />
+            <Button variant="ghost" size="sm" onClick={signOut}>
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </header>
         <div className="max-w-7xl mx-auto p-6 md:p-10 relative z-10">
           <Outlet />

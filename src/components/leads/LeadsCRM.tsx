@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Loader2, Users, MapPin, Filter } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { type LeadRow, type LeadStatus } from "@/components/site-mapper/types";
 import { LeadFormDialog, type LeadFormValues } from "@/components/site-mapper/LeadFormDialog";
 import { NewLeadDialog, type NewLeadValues } from "./NewLeadDialog";
+import { MapLeadToPlotDialog } from "./MapLeadToPlotDialog";
 import { LeadsStatCards } from "./LeadsStatCards";
 import { TeamsOverview, type TeamSummary } from "./TeamsOverview";
 import { EmployeesOverview, type EmployeeSummary } from "./EmployeesOverview";
@@ -23,6 +24,7 @@ type Profile = {
 };
 
 type View = "teams" | "all" | "team" | "employee";
+type LeadTypeFilter = "all" | "plot" | "general";
 const UNASSIGNED_KEY = "__unassigned__";
 
 function computeStats(leads: LeadRow[]) {
@@ -43,6 +45,8 @@ export function LeadsCRM({ userId }: { userId: string }) {
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
   const [viewingLead, setViewingLead] = useState<LeadRow | null>(null);
+  const [mappingLead, setMappingLead] = useState<LeadRow | null>(null);
+  const [leadTypeFilter, setLeadTypeFilter] = useState<LeadTypeFilter>("all");
 
   const { data: role, isLoading: roleLoading } = useQuery({
     queryKey: ["role", userId],
@@ -155,17 +159,37 @@ export function LeadsCRM({ userId }: { userId: string }) {
     (id && projectById.get(id)?.name) || "Project";
 
   const plotNumberOf = (lead: LeadRow) =>
-    plotById.get(lead.plot_id)?.plot_number as string | undefined;
+    lead.plot_id ? plotById.get(lead.plot_id)?.plot_number as string | undefined : undefined;
 
   const plotLabelOf = (lead: LeadRow) => {
-    const plot = plotById.get(lead.plot_id);
-    if (!plot) return undefined;
+    // General lead (no plot assigned)
+    if (!lead.plot_id && !lead.project_id) {
+      return "General Lead — Unmapped";
+    }
+    const plot = plotById.get(lead.plot_id!);
+    if (!plot) {
+      // Has project but no plot (shouldn't happen but handle gracefully)
+      if (lead.project_id) return projectNameOf(lead.project_id);
+      return undefined;
+    }
     const projectName = (plot as any).projects?.name;
     return projectName ? `${projectName} · Plot ${plot.plot_number}` : `Plot ${plot.plot_number}`;
   };
 
   const allLeads = useMemo(() => leads ?? [], [leads]);
-  const orgStats = useMemo(() => computeStats(allLeads), [allLeads]);
+
+  // Separate general leads (no plot/project) from plot leads
+  const generalLeads = useMemo(() => allLeads.filter(l => !l.plot_id && !l.project_id), [allLeads]);
+  const plotLeads = useMemo(() => allLeads.filter(l => l.plot_id && l.project_id), [allLeads]);
+
+  // Filter leads based on lead type filter
+  const filteredLeadsByType = useMemo(() => {
+    if (leadTypeFilter === "general") return generalLeads;
+    if (leadTypeFilter === "plot") return plotLeads;
+    return allLeads;
+  }, [leadTypeFilter, generalLeads, plotLeads, allLeads]);
+
+  const orgStats = useMemo(() => computeStats(filteredLeadsByType), [filteredLeadsByType]);
 
   // ---- Build manager teams (admin only needs the full breakdown) ----
   const teamSummaries: TeamSummary[] = useMemo(() => {
@@ -231,8 +255,13 @@ export function LeadsCRM({ userId }: { userId: string }) {
 
   const teamLeads = useMemo(() => {
     if (!activeTeam) return [];
-    return allLeads.filter((l) => l.created_by && activeTeam.scopeIds.has(l.created_by));
-  }, [activeTeam, allLeads]);
+    const leads = allLeads.filter((l) => l.created_by && activeTeam.scopeIds.has(l.created_by));
+    return leads.filter(l => {
+      if (leadTypeFilter === "general") return !l.plot_id && !l.project_id;
+      if (leadTypeFilter === "plot") return l.plot_id && l.project_id;
+      return true;
+    });
+  }, [activeTeam, allLeads, leadTypeFilter]);
 
   const scopedLeads = useMemo(() => {
     if (selectedEmployeeId && selectedEmployeeId !== "ALL")
@@ -258,8 +287,15 @@ export function LeadsCRM({ userId }: { userId: string }) {
   }, [activeTeam, allLeads]);
 
   const myLeads = useMemo(
-    () => allLeads.filter((l) => l.created_by === userId),
-    [allLeads, userId],
+    () => {
+      const leads = allLeads.filter((l) => l.created_by === userId);
+      return leads.filter(l => {
+        if (leadTypeFilter === "general") return !l.plot_id && !l.project_id;
+        if (leadTypeFilter === "plot") return l.plot_id && l.project_id;
+        return true;
+      });
+    },
+    [allLeads, userId, leadTypeFilter],
   );
 
   // ---------------- Mutations ----------------
@@ -330,6 +366,22 @@ export function LeadsCRM({ userId }: { userId: string }) {
     onError: (e: any) => toast.error(e.message ?? "Failed to transfer lead"),
   });
 
+  const mapLeadToPlot = useMutation({
+    mutationFn: async ({ id, plotId, projectId }: { id: string; plotId: string; projectId: string }) => {
+      const { error } = await (supabase as any)
+        .from("plot_leads")
+        .update({ plot_id: plotId, project_id: projectId })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lead mapped to plot");
+      setMappingLead(null);
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message ?? "Failed to map lead"),
+  });
+
   const canManageLead = (lead: LeadRow) =>
     isAdmin || lead.created_by === userId || lead.assigned_to === userId;
 
@@ -379,6 +431,10 @@ export function LeadsCRM({ userId }: { userId: string }) {
         setViewingLead(null);
         setEditingLead(lead);
       }}
+      onMapPlot={(lead) => {
+        setViewingLead(null);
+        setMappingLead(lead);
+      }}
     />
   );
 
@@ -416,6 +472,59 @@ export function LeadsCRM({ userId }: { userId: string }) {
 
         <LeadsStatCards {...stats} />
 
+        {/* Lead Type Filter Chips */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <span className="text-xs text-muted-foreground flex items-center gap-1.5 shrink-0">
+            <Filter className="h-3 w-3" /> Filter:
+          </span>
+          <button
+            onClick={() => setLeadTypeFilter("all")}
+            className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+              leadTypeFilter === "all"
+                ? "bg-terracotta text-white border-terracotta shadow-sm"
+                : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+            }`}
+          >
+            All Leads
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "all" ? "bg-white/20" : "bg-muted"}`}>
+              {allLeads.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setLeadTypeFilter("plot")}
+            className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+              leadTypeFilter === "plot"
+                ? "bg-terracotta text-white border-terracotta shadow-sm"
+                : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+            }`}
+          >
+            <MapPin className="h-3 w-3" /> Plot Leads
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "plot" ? "bg-white/20" : "bg-muted"}`}>
+              {plotLeads.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setLeadTypeFilter("general")}
+            className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+              leadTypeFilter === "general"
+                ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                : generalLeads.length > 0
+                  ? "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+            }`}
+          >
+            <Users className="h-3 w-3" /> General Leads
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "general" ? "bg-white/20" : generalLeads.length > 0 ? "bg-blue-200" : "bg-muted"}`}>
+              {generalLeads.length}
+            </span>
+          </button>
+          {generalLeads.length > 0 && leadTypeFilter !== "general" && (
+            <span className="text-[10px] text-blue-600 font-medium animate-pulse shrink-0">
+              {generalLeads.length} unmapped lead{generalLeads.length > 1 ? "s" : ""} need mapping
+            </span>
+          )}
+        </div>
+
         <LeadsBoard
           leads={myLeads}
           employeeNameOf={employeeNameOf}
@@ -425,6 +534,7 @@ export function LeadsCRM({ userId }: { userId: string }) {
           onOpenDetail={setViewingLead}
           onStatusChange={(id, status) => setStatus.mutate({ id, status })}
           onEdit={setEditingLead}
+          onMapToPlot={setMappingLead}
         />
 
         <NewLeadDialog
@@ -440,6 +550,13 @@ export function LeadsCRM({ userId }: { userId: string }) {
           pending={updateLead.isPending}
           onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
           onOpenChange={(o) => !o && setEditingLead(null)}
+        />
+        <MapLeadToPlotDialog
+          open={!!mappingLead}
+          lead={mappingLead}
+          pending={mapLeadToPlot.isPending}
+          onOpenChange={(o) => !o && setMappingLead(null)}
+          onSubmit={(plotId, projectId) => mappingLead && mapLeadToPlot.mutate({ id: mappingLead.id, plotId, projectId })}
         />
         {detailDialog}
       </div>
@@ -486,6 +603,61 @@ export function LeadsCRM({ userId }: { userId: string }) {
 
         <LeadsStatCards {...stats} />
 
+        {/* Lead Type Filter Chips */}
+        {isShowingEmployee && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 shrink-0">
+              <Filter className="h-3 w-3" /> Filter:
+            </span>
+            <button
+              onClick={() => setLeadTypeFilter("all")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "all"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              All Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "all" ? "bg-white/20" : "bg-muted"}`}>
+                {allLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("plot")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "plot"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <MapPin className="h-3 w-3" /> Plot Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "plot" ? "bg-white/20" : "bg-muted"}`}>
+                {plotLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("general")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "general"
+                  ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                  : generalLeads.length > 0
+                    ? "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                    : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <Users className="h-3 w-3" /> General Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "general" ? "bg-white/20" : generalLeads.length > 0 ? "bg-blue-200" : "bg-muted"}`}>
+                {generalLeads.length}
+              </span>
+            </button>
+            {generalLeads.length > 0 && leadTypeFilter !== "general" && (
+              <span className="text-[10px] text-blue-600 font-medium animate-pulse shrink-0">
+                {generalLeads.length} unmapped lead{generalLeads.length > 1 ? "s" : ""} need mapping
+              </span>
+            )}
+          </div>
+        )}
+
         {!isShowingEmployee ? (
           <EmployeesOverview
             employees={employeeSummaries}
@@ -503,6 +675,7 @@ export function LeadsCRM({ userId }: { userId: string }) {
             onOpenDetail={setViewingLead}
             onStatusChange={(id, status) => setStatus.mutate({ id, status })}
             onEdit={setEditingLead}
+            onMapToPlot={setMappingLead}
           />
         )}
 
@@ -519,6 +692,13 @@ export function LeadsCRM({ userId }: { userId: string }) {
           pending={updateLead.isPending}
           onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
           onOpenChange={(o) => !o && setEditingLead(null)}
+        />
+        <MapLeadToPlotDialog
+          open={!!mappingLead}
+          lead={mappingLead}
+          pending={mapLeadToPlot.isPending}
+          onOpenChange={(o) => !o && setMappingLead(null)}
+          onSubmit={(plotId, projectId) => mappingLead && mapLeadToPlot.mutate({ id: mappingLead.id, plotId, projectId })}
         />
         {detailDialog}
       </div>
@@ -561,8 +741,62 @@ export function LeadsCRM({ userId }: { userId: string }) {
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to teams
           </button>
+
+          {/* Lead Type Filter Chips */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 shrink-0">
+              <Filter className="h-3 w-3" /> Filter:
+            </span>
+            <button
+              onClick={() => setLeadTypeFilter("all")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "all"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              All Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "all" ? "bg-white/20" : "bg-muted"}`}>
+                {allLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("plot")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "plot"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <MapPin className="h-3 w-3" /> Plot Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "plot" ? "bg-white/20" : "bg-muted"}`}>
+                {plotLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("general")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "general"
+                  ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                  : generalLeads.length > 0
+                    ? "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                    : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <Users className="h-3 w-3" /> General Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "general" ? "bg-white/20" : generalLeads.length > 0 ? "bg-blue-200" : "bg-muted"}`}>
+                {generalLeads.length}
+              </span>
+            </button>
+            {generalLeads.length > 0 && leadTypeFilter !== "general" && (
+              <span className="text-[10px] text-blue-600 font-medium animate-pulse shrink-0">
+                {generalLeads.length} unmapped lead{generalLeads.length > 1 ? "s" : ""} need mapping
+              </span>
+            )}
+          </div>
+
           <LeadsBoard
-            leads={allLeads}
+            leads={filteredLeadsByType}
             employeeNameOf={employeeNameOf}
             plotLabelOf={plotLabelOf}
             canManageLead={canManageLead}
@@ -573,6 +807,7 @@ export function LeadsCRM({ userId }: { userId: string }) {
             onTransfer={(id, newEmployeeId) => transferLead.mutate({ id, newEmployeeId })}
             onEdit={setEditingLead}
             onDelete={(id) => deleteLead.mutate(id)}
+            onMapToPlot={setMappingLead}
           />
         </div>
       )}
@@ -625,6 +860,59 @@ export function LeadsCRM({ userId }: { userId: string }) {
 
           <LeadsStatCards {...computeStats(scopedLeads)} />
 
+          {/* Lead Type Filter Chips */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 shrink-0">
+              <Filter className="h-3 w-3" /> Filter:
+            </span>
+            <button
+              onClick={() => setLeadTypeFilter("all")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "all"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              All Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "all" ? "bg-white/20" : "bg-muted"}`}>
+                {allLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("plot")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "plot"
+                  ? "bg-terracotta text-white border-terracotta shadow-sm"
+                  : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <MapPin className="h-3 w-3" /> Plot Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "plot" ? "bg-white/20" : "bg-muted"}`}>
+                {plotLeads.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setLeadTypeFilter("general")}
+              className={`inline-flex items-center gap-1.5 shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                leadTypeFilter === "general"
+                  ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                  : generalLeads.length > 0
+                    ? "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                    : "bg-card border-border/60 text-muted-foreground hover:border-terracotta/40"
+              }`}
+            >
+              <Users className="h-3 w-3" /> General Leads
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${leadTypeFilter === "general" ? "bg-white/20" : generalLeads.length > 0 ? "bg-blue-200" : "bg-muted"}`}>
+                {generalLeads.length}
+              </span>
+            </button>
+            {generalLeads.length > 0 && leadTypeFilter !== "general" && (
+              <span className="text-[10px] text-blue-600 font-medium animate-pulse shrink-0">
+                {generalLeads.length} unmapped lead{generalLeads.length > 1 ? "s" : ""} need mapping
+              </span>
+            )}
+          </div>
+
           <LeadsBoard
             leads={scopedLeads}
             employeeNameOf={employeeNameOf}
@@ -637,6 +925,7 @@ export function LeadsCRM({ userId }: { userId: string }) {
             onTransfer={(id, newEmployeeId) => transferLead.mutate({ id, newEmployeeId })}
             onEdit={setEditingLead}
             onDelete={(id) => deleteLead.mutate(id)}
+            onMapToPlot={setMappingLead}
           />
         </div>
       )}
@@ -654,6 +943,13 @@ export function LeadsCRM({ userId }: { userId: string }) {
         pending={updateLead.isPending}
         onSubmit={(values) => editingLead && updateLead.mutate({ id: editingLead.id, values })}
         onOpenChange={(o) => !o && setEditingLead(null)}
+      />
+      <MapLeadToPlotDialog
+        open={!!mappingLead}
+        lead={mappingLead}
+        pending={mapLeadToPlot.isPending}
+        onOpenChange={(o) => !o && setMappingLead(null)}
+        onSubmit={(plotId, projectId) => mappingLead && mapLeadToPlot.mutate({ id: mappingLead.id, plotId, projectId })}
       />
       {detailDialog}
     </div>

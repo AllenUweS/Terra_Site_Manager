@@ -1,4 +1,4 @@
-import { Phone, MessageCircle, Flame, Pencil, Trash2, ArrowLeftRight, Map } from "lucide-react";
+import { Phone, MessageCircle, Flame, Pencil, Trash2, ArrowLeftRight, Map, MapPin } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Select,
@@ -37,6 +37,7 @@ export function LeadCard({
   onEdit,
   onDelete,
   onOpenDetail,
+  onMapToPlot,
 }: {
   lead: LeadRow;
   employeeName: string;
@@ -49,6 +50,7 @@ export function LeadCard({
   onEdit?: (lead: LeadRow) => void;
   onDelete?: (id: string) => void;
   onOpenDetail?: (lead: LeadRow) => void;
+  onMapToPlot?: (lead: LeadRow) => void;
 }) {
   const palette = LEAD_STATUS_PALETTE[lead.status];
   const temp = getTemperature(lead);
@@ -85,6 +87,16 @@ export function LeadCard({
             className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
             onClick={(e) => e.stopPropagation()}
           >
+            {!lead.plot_id && !lead.project_id && onMapToPlot && (
+              <button
+                className="rounded p-1 text-terracotta hover:bg-terracotta/10 relative"
+                title="Map to plot"
+                onClick={() => onMapToPlot(lead)}
+              >
+                <MapPin className="h-3 w-3" />
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-terracotta text-[8px] font-bold flex items-center justify-center text-white">+</span>
+              </button>
+            )}
             {onEdit && (
               <button
                 className="rounded p-1 text-muted-foreground hover:bg-muted"

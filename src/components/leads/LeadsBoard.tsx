@@ -44,6 +44,7 @@ export function LeadsBoard({
   onEdit,
   onDelete,
   onOpenDetail,
+  onMapToPlot,
   projects,
 }: {
   leads: LeadRow[];
@@ -56,6 +57,7 @@ export function LeadsBoard({
   onEdit?: (lead: LeadRow) => void;
   onDelete?: (id: string) => void;
   onOpenDetail?: (lead: LeadRow) => void;
+  onMapToPlot?: (lead: LeadRow) => void;
   /** When provided, shows a "choose a project" chip row above the board so
    *  leads can be scoped to one project at a time. */
   projects?: ProjectOption[];
@@ -232,6 +234,7 @@ export function LeadsBoard({
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onOpenDetail={onOpenDetail}
+                      onMapToPlot={onMapToPlot}
                     />
                   ))}
                 </div>

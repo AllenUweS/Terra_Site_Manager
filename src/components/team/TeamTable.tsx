@@ -16,22 +16,24 @@ const HIERARCHY: Record<string, number> = {
   "SUPER ADMIN": 1,
   "ADMIN": 2,
   "ADMINS": 2,
-  "MANAGER": 3,
-  "MANAGERS": 3,
-  "HR": 4,
-  "EMPLOYEE": 5,
-  "EMPLOYEES": 5,
+  "MANAGEMENT": 3,
+  "MANAGER": 4,
+  "MANAGERS": 4,
+  "HR": 5,
+  "EMPLOYEE": 6,
+  "EMPLOYEES": 6,
 };
 
 const getPriority = (name: string) => HIERARCHY[name] || 99;
 
 const getRoleGradient = (role: string) => {
   const r = role.toLowerCase();
-  if (r.includes('super')) return 'bg-gradient-to-r from-stone-800 to-stone-600 text-white border-transparent shadow-sm'; // Ink/Charcoal
-  if (r.includes('admin')) return 'bg-gradient-to-r from-orange-700 to-orange-500 text-white border-transparent shadow-sm'; // Terracotta
-  if (r.includes('manager')) return 'bg-gradient-to-r from-amber-600 to-yellow-500 text-white border-transparent shadow-sm'; // Sand/Gold
-  if (r.includes('hr')) return 'bg-gradient-to-r from-rose-700 to-rose-500 text-white border-transparent shadow-sm'; // Warm accent
-  return 'bg-gradient-to-r from-stone-500 to-stone-400 text-white border-transparent shadow-sm'; // Neutral
+  if (r.includes('super')) return 'bg-gradient-to-r from-stone-800 to-stone-600 text-white border-transparent shadow-sm';
+  if (r.includes('management')) return 'bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600 text-white border-transparent shadow-sm';
+  if (r.includes('admin')) return 'bg-gradient-to-r from-orange-700 to-orange-500 text-white border-transparent shadow-sm';
+  if (r.includes('manager')) return 'bg-gradient-to-r from-amber-600 to-yellow-500 text-white border-transparent shadow-sm';
+  if (r.includes('hr')) return 'bg-gradient-to-r from-rose-700 to-rose-500 text-white border-transparent shadow-sm';
+  return 'bg-gradient-to-r from-stone-500 to-stone-400 text-white border-transparent shadow-sm';
 };
 
 export function TeamTable() {
@@ -60,7 +62,7 @@ export function TeamTable() {
     },
   });
 
-  const isAdmin = userRole === "admin" || userRole === "super_admin";
+  const isAdmin = userRole === "admin" || userRole === "super_admin" || userRole === "management";
 
   const { data: profiles, isLoading: isLoadingProfiles } = useQuery({
     queryKey: ["team_profiles"],
@@ -92,6 +94,7 @@ export function TeamTable() {
       let primaryRole = "employee";
       if (roleMap.includes("super_admin")) primaryRole = "super_admin";
       else if (roleMap.includes("admin")) primaryRole = "admin";
+      else if (roleMap.includes("management")) primaryRole = "management";
       else if (roleMap.includes("manager")) primaryRole = "manager";
 
       return {

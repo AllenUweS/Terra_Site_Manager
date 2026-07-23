@@ -5,6 +5,7 @@ import {
   Mail,
   Calendar,
   MapPin,
+  MapPinOff,
   IndianRupee,
   Flame,
   Pencil,
@@ -56,6 +57,7 @@ export function LeadDetailDialog({
   onOpenChange,
   onStatusChange,
   onEdit,
+  onMapPlot,
 }: {
   lead: LeadRow | null;
   employeeName: string;
@@ -68,6 +70,7 @@ export function LeadDetailDialog({
   onOpenChange: (open: boolean) => void;
   onStatusChange: (id: string, status: LeadStatus) => void;
   onEdit?: (lead: LeadRow) => void;
+  onMapPlot?: (lead: LeadRow) => void;
 }) {
   const open = !!lead;
   const palette = lead ? LEAD_STATUS_PALETTE[lead.status] : null;
@@ -182,6 +185,17 @@ export function LeadDetailDialog({
                   label="Plot"
                   value={plotNumber ? `${plotNumber}` : "Unassigned"}
                   icon={MapPin}
+                  action={
+                    canManage && onMapPlot ? (
+                      <button
+                        type="button"
+                        onClick={() => onMapPlot(lead)}
+                        className="text-[10px] font-semibold text-terracotta hover:underline ml-auto"
+                      >
+                        {plotNumber ? "Change" : "+ Map"}
+                      </button>
+                    ) : undefined
+                  }
                 />
               </div>
 
@@ -194,16 +208,50 @@ export function LeadDetailDialog({
             </DialogHeader>
 
             {/* ---- Site map, mapped to the lead's project & plot ---- */}
-            <div className="px-6 pb-6 pt-1 space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                <MapPin className="h-3 w-3" /> Site location
-              </p>
-              <MiniSiteMap
-                projectId={lead.project_id}
-                plotId={lead.plot_id}
-                projectName={projectName}
-              />
-            </div>
+            {lead.project_id && lead.plot_id && (
+              <div className="px-6 pb-6 pt-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                    <MapPin className="h-3 w-3" /> Site location
+                  </p>
+                  {canManage && onMapPlot && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onMapPlot(lead)}
+                      className="h-6 text-[11px] text-terracotta hover:text-terracotta hover:bg-terracotta/10 px-2 gap-1 font-medium"
+                    >
+                      <Pencil className="h-3 w-3" /> Change Mapping
+                    </Button>
+                  )}
+                </div>
+                <MiniSiteMap
+                  projectId={lead.project_id!}
+                  plotId={lead.plot_id!}
+                  projectName={projectName}
+                />
+              </div>
+            )}
+            {!lead.project_id && !lead.plot_id && (
+              <div className="px-6 pb-6 pt-1">
+                <div className="rounded-xl border border-dashed border-terracotta/30 bg-terracotta/[0.03] p-5 text-center flex flex-col items-center justify-center">
+                  <MapPinOff className="h-6 w-6 text-terracotta/70 mb-2" />
+                  <p className="text-xs font-medium text-foreground">This lead is not yet mapped to a specific plot.</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 max-w-sm">
+                    Map this lead to a layout & plot to enable site mapping, layout tracking, and proof photo evidence.
+                  </p>
+                  {canManage && onMapPlot && (
+                    <Button
+                      size="sm"
+                      onClick={() => onMapPlot(lead)}
+                      className="mt-3 gap-1.5 bg-terracotta hover:bg-terracotta/90 text-white font-medium shadow-sm"
+                    >
+                      <MapPin className="h-3.5 w-3.5" /> Map to Plot
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
             <SiteVisitProofPanel
               lead={lead}
               userId={userId}
@@ -221,17 +269,22 @@ function Stat({
   label,
   value,
   icon: Icon,
+  action,
 }: {
   label: string;
   value: string;
   icon?: ComponentType<{ className?: string }>;
+  action?: React.ReactNode;
 }) {
   return (
     <div className="rounded-lg border border-border/50 bg-card px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
-        {Icon && <Icon className="h-2.5 w-2.5" />}
-        {label}
-      </p>
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+          {Icon && <Icon className="h-2.5 w-2.5" />}
+          {label}
+        </p>
+        {action}
+      </div>
       <p className="text-sm font-semibold mt-0.5 truncate">{value}</p>
     </div>
   );

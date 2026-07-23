@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { SiteMapper } from "@/components/site-mapper/SiteMapper";
 import { EditProjectDialog } from "@/components/EditProjectDialog";
+import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 
 export const Route = createFileRoute("/_authenticated/projects_/$id")({
   component: ProjectDetail,
@@ -154,22 +155,33 @@ function ProjectDetail() {
     }
   }
 
-  async function uploadDocument(file: File) {
-    const path = `${id}/${Date.now()}-${file.name}`;
-    const { error: upErr } = await supabase.storage.from("project-documents").upload(path, file);
-    if (upErr) return toast.error(upErr.message);
-    const { error } = await (supabase as any).from("project_documents").insert({
-      project_id: id,
-      name: file.name,
-      file_path: path,
-      file_type: file.type || null,
-      size_bytes: file.size,
-      uploaded_by: user.id,
-    });
-    if (error) return toast.error(error.message);
-    toast.success("Document uploaded");
-    qc.invalidateQueries({ queryKey: ["project-docs", id] });
+  async function uploadDocuments(files: File[]) {
+    let count = 0;
+    for (const file of files) {
+      const path = `${id}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("project-documents").upload(path, file);
+      if (upErr) {
+        toast.error(`Failed to upload ${file.name}: ${upErr.message}`);
+        continue;
+      }
+      const { error } = await (supabase as any).from("project_documents").insert({
+        project_id: id,
+        name: file.name,
+        file_path: path,
+        file_type: file.type || null,
+        size_bytes: file.size,
+        uploaded_by: user.id,
+      });
+      if (!error) count++;
+    }
+    if (count > 0) {
+      toast.success(`Uploaded ${count} document${count > 1 ? "s" : ""}`);
+      qc.invalidateQueries({ queryKey: ["project-docs", id] });
+    }
   }
+
+  const [viewingDoc, setViewingDoc] = useState<any>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   async function deleteDocument(doc: any) {
     if (!confirm(`Delete "${doc.name}"?`)) return;
@@ -181,10 +193,22 @@ function ProjectDetail() {
   }
 
   async function handleDocumentAction(doc: any, action: "preview" | "download") {
+    if (action === "preview") {
+      setViewingDoc(doc);
+      setViewerOpen(true);
+      return;
+    }
     const { data } = await supabase.storage
       .from("project-documents")
-      .createSignedUrl(doc.file_path, 60, { download: action === "download" });
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+      .createSignedUrl(doc.file_path, 60, { download: true });
+    if (data?.signedUrl) {
+      const link = document.createElement("a");
+      link.href = data.signedUrl;
+      link.download = doc.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   }
 
   return (
@@ -290,8 +314,9 @@ function ProjectDetail() {
               </Button>
               <input
                 type="file"
+                multiple
                 className="hidden"
-                onChange={(e) => e.target.files?.[0] && uploadDocument(e.target.files[0])}
+                onChange={(e) => e.target.files?.length && uploadDocuments(Array.from(e.target.files))}
               />
             </label>
           )}
@@ -333,6 +358,24 @@ function ProjectDetail() {
       </section>
         </>
       ) : null}
+
+      <DocumentViewerModal
+        open={viewerOpen}
+        onOpenChange={(open) => {
+          setViewerOpen(open);
+          if (!open) setViewingDoc(null);
+        }}
+        document={viewingDoc ? {
+          id: viewingDoc.id,
+          name: viewingDoc.name,
+          file_path: viewingDoc.file_path,
+          mime_type: viewingDoc.file_type,
+          file_size: viewingDoc.size_bytes,
+          is_downloadable: viewingDoc.is_downloadable,
+        } : null}
+        bucketName="project-documents"
+        canEdit={isAdmin}
+      />
     </div>
   );
 }

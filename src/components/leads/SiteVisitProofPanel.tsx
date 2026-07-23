@@ -271,7 +271,7 @@ export function SiteVisitProofPanel({
               correction={correction}
               onCorrection={setCorrection}
               onSaveCorrection={() => addCorrection.mutate(visit.id)}
-              onReview={(status) => review.mutate({ id: visit.id, status })}
+              onReview={(status: "verified" | "needs_review") => review.mutate({ id: visit.id, status })}
             />
           ))
         )}

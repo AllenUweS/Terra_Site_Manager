@@ -1,7 +1,6 @@
 import { ChevronRight, Flame, Trophy } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials, tintFor } from "./leadUtils";
-import { EmployeeStripItem } from "./EmployeeStrip";
 
 export interface EmployeeSummary {
   employeeId: string;

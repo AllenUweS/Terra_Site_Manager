@@ -65,10 +65,10 @@ export function VisitProofsWorkspace({ userId }: { userId: string }) {
       return data ?? [];
     },
   });
-  const profileById = useMemo(() => new Map(profiles.map((row: any) => [row.id, row])), [profiles]);
-  const leadById = useMemo(() => new Map(leads.map((row: any) => [row.id, row])), [leads]);
-  const projectById = useMemo(() => new Map(projects.map((row: any) => [row.id, row])), [projects]);
-  const plotById = useMemo(() => new Map(plots.map((row: any) => [row.id, row])), [plots]);
+  const profileById = useMemo(() => new Map<string, any>(profiles.map((row: any) => [row.id, row])), [profiles]);
+  const leadById = useMemo(() => new Map<string, any>(leads.map((row: any) => [row.id, row])), [leads]);
+  const projectById = useMemo(() => new Map<string, any>(projects.map((row: any) => [row.id, row])), [projects]);
+  const plotById = useMemo(() => new Map<string, any>(plots.map((row: any) => [row.id, row])), [plots]);
   const filtered = useMemo(
     () =>
       visits.filter((visit: any) => {
@@ -226,7 +226,7 @@ function VisitReviewCard({
             await supabase.storage
               .from("site-visit-proofs")
               .createSignedUrl(photo.storage_path, 3600)
-          ).data.signedUrl,
+          ).data?.signedUrl ?? "",
         })),
       ),
   });

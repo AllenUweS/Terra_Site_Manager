@@ -107,8 +107,8 @@ export type LeadStatus =
 
 export interface LeadRow {
   id: string;
-  plot_id: string;
-  project_id: string;
+  plot_id: string | null;
+  project_id: string | null;
   name: string;
   phone: string;
   email: string | null;
